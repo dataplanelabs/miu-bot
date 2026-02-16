@@ -47,6 +47,17 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning(f"Telegram channel not available: {e}")
         
+        # Zalo channel
+        if self.config.channels.zalo.enabled:
+            try:
+                from nanobot.channels.zalo import ZaloChannel
+                self.channels["zalo"] = ZaloChannel(
+                    self.config.channels.zalo, self.bus
+                )
+                logger.info("Zalo channel enabled")
+            except ImportError as e:
+                logger.warning(f"Zalo channel not available: {e}")
+
         # WhatsApp channel
         if self.config.channels.whatsapp.enabled:
             try:

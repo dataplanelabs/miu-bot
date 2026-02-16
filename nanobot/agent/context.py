@@ -149,7 +149,19 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         # System prompt
         system_prompt = self.build_system_prompt(skill_names)
         if channel and chat_id:
-            system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
+            session_info = f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
+            # Channel-specific formatting rules
+            if channel == "zalo":
+                session_info += (
+                    "\n\nFORMATTING RULES (MANDATORY):"
+                    "\n- Zalo does NOT support markdown. NEVER use: ## headings, **bold**, *italic*, `code`, tables (|---|), or > quotes."
+                    "\n- Use plain text only: VIET HOA for headings, bullet '•' or '-' for lists, '→' for arrows, '---' for separators."
+                    "\n- NEVER use emojis as decorative headers (📋, ✅, 🎯, 💡, 📌, 🔧). Minimal emoji only if contextually needed."
+                    "\n- NEVER output tables. Use simple lists instead."
+                    "\n- NEVER output 'Reflection', 'Next Steps', or 'Option A/B/C' sections unless explicitly asked."
+                    "\n- Answer directly and concisely."
+                )
+            system_prompt += session_info
         messages.append({"role": "system", "content": system_prompt})
 
         # History

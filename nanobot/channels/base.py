@@ -89,19 +89,21 @@ class BaseChannel(ABC):
         chat_id: str,
         content: str,
         media: list[str] | None = None,
-        metadata: dict[str, Any] | None = None
+        metadata: dict[str, Any] | None = None,
+        observe_only: bool = False,
     ) -> None:
         """
         Handle an incoming message from the chat platform.
-        
+
         This method checks permissions and forwards to the bus.
-        
+
         Args:
             sender_id: The sender's identifier.
             chat_id: The chat/channel identifier.
             content: Message text content.
             media: Optional list of media URLs.
             metadata: Optional channel-specific metadata.
+            observe_only: If True, add to session history but don't generate a response.
         """
         if not self.is_allowed(sender_id):
             logger.warning(
@@ -109,16 +111,17 @@ class BaseChannel(ABC):
                 f"Add them to allowFrom list in config to grant access."
             )
             return
-        
+
         msg = InboundMessage(
             channel=self.name,
             sender_id=str(sender_id),
             chat_id=str(chat_id),
             content=content,
             media=media or [],
-            metadata=metadata or {}
+            metadata=metadata or {},
+            observe_only=observe_only,
         )
-        
+
         await self.bus.publish_inbound(msg)
     
     @property

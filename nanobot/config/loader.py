@@ -72,21 +72,47 @@ def _migrate_config(data: dict) -> dict:
     return data
 
 
-def convert_keys(data: Any) -> Any:
-    """Convert camelCase keys to snake_case for Pydantic."""
+# Dict fields whose keys should NOT be converted (env vars, HTTP headers, etc.)
+_PASSTHROUGH_KEYS = {"env", "headers", "extra_headers", "extraHeaders", "groups"}
+
+
+def convert_keys(data: Any, parent_key: str | None = None) -> Any:
+    """Convert camelCase keys to snake_case for Pydantic.
+
+    Skips conversion for dict values under passthrough keys (env, headers)
+    where the original key casing must be preserved.
+    """
     if isinstance(data, dict):
-        return {camel_to_snake(k): convert_keys(v) for k, v in data.items()}
+        result = {}
+        for k, v in data.items():
+            new_key = camel_to_snake(k)
+            # Preserve original keys for passthrough fields
+            if new_key in _PASSTHROUGH_KEYS or parent_key in _PASSTHROUGH_KEYS:
+                result[new_key] = v
+            else:
+                result[new_key] = convert_keys(v, parent_key=new_key)
+        return result
     if isinstance(data, list):
-        return [convert_keys(item) for item in data]
+        return [convert_keys(item, parent_key=parent_key) for item in data]
     return data
 
 
-def convert_to_camel(data: Any) -> Any:
-    """Convert snake_case keys to camelCase."""
+def convert_to_camel(data: Any, parent_key: str | None = None) -> Any:
+    """Convert snake_case keys to camelCase.
+
+    Preserves original keys for passthrough fields.
+    """
     if isinstance(data, dict):
-        return {snake_to_camel(k): convert_to_camel(v) for k, v in data.items()}
+        result = {}
+        for k, v in data.items():
+            new_key = snake_to_camel(k)
+            if k in _PASSTHROUGH_KEYS or parent_key in _PASSTHROUGH_KEYS:
+                result[new_key] = v
+            else:
+                result[new_key] = convert_to_camel(v, parent_key=k)
+        return result
     if isinstance(data, list):
-        return [convert_to_camel(item) for item in data]
+        return [convert_to_camel(item, parent_key=parent_key) for item in data]
     return data
 
 

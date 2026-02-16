@@ -316,9 +316,18 @@ def gateway(
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
     
+    from loguru import logger
+    import sys
+
     if verbose:
         import logging
         logging.basicConfig(level=logging.DEBUG)
+        # Configure loguru for verbose output
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG", format="<green>{time:HH:mm:ss}</green> | <level>{level:<7}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>")
+    else:
+        logger.remove()
+        logger.add(sys.stderr, level="INFO", format="<green>{time:HH:mm:ss}</green> | <level>{level:<7}</level> | <level>{message}</level>")
     
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     

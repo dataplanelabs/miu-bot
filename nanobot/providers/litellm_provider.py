@@ -5,8 +5,10 @@ import json_repair
 import os
 from typing import Any
 
+import httpx
 import litellm
 from litellm import acompletion
+from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
@@ -157,12 +159,87 @@ class LiteLLMProvider(LLMProvider):
             response = await acompletion(**kwargs)
             return self._parse_response(response)
         except Exception as e:
-            # Return error as content for graceful handling
+            # Fallback: if litellm can't parse the response (e.g. non-standard
+            # finish_reason from Z.ai), make a direct httpx call and parse manually.
+            if self.api_base and self.api_key:
+                try:
+                    logger.debug(f"LiteLLM failed ({type(e).__name__}), trying direct HTTP fallback")
+                    return await self._direct_chat(kwargs)
+                except Exception as fallback_err:
+                    logger.error(f"Direct HTTP fallback also failed: {fallback_err}")
+            # Return concise error for graceful handling
+            short_error = str(e).split('\n')[0][:300]
             return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
+                content=f"Error calling LLM: {short_error}",
                 finish_reason="error",
             )
     
+    async def _direct_chat(self, kwargs: dict[str, Any]) -> LLMResponse:
+        """Direct HTTP fallback when LiteLLM can't parse the provider's response."""
+        url = f"{self.api_base.rstrip('/')}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        if self.extra_headers:
+            headers.update(self.extra_headers)
+
+        # Build OpenAI-compatible request body
+        body: dict[str, Any] = {
+            "model": kwargs["model"].split("/")[-1],  # strip litellm prefix
+            "messages": kwargs["messages"],
+            "max_tokens": kwargs.get("max_tokens", 4096),
+            "temperature": kwargs.get("temperature", 0.7),
+        }
+        if kwargs.get("tools"):
+            body["tools"] = kwargs["tools"]
+            body["tool_choice"] = "auto"
+
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(url, headers=headers, json=body)
+            resp.raise_for_status()
+            data = resp.json()
+
+        return self._parse_raw_response(data)
+
+    def _parse_raw_response(self, data: dict[str, Any]) -> LLMResponse:
+        """Parse a raw OpenAI-compatible JSON response dict."""
+        choice = data["choices"][0]
+        message = choice.get("message", {})
+
+        tool_calls = []
+        for tc in (message.get("tool_calls") or []):
+            args = tc["function"]["arguments"]
+            if isinstance(args, str):
+                args = json_repair.loads(args)
+            tool_calls.append(ToolCallRequest(
+                id=tc["id"],
+                name=tc["function"]["name"],
+                arguments=args,
+            ))
+
+        usage = {}
+        if "usage" in data and data["usage"]:
+            usage = {
+                "prompt_tokens": data["usage"].get("prompt_tokens", 0),
+                "completion_tokens": data["usage"].get("completion_tokens", 0),
+                "total_tokens": data["usage"].get("total_tokens", 0),
+            }
+
+        # Map non-standard finish_reasons to 'stop'
+        finish_reason = choice.get("finish_reason", "stop")
+        if finish_reason not in ("stop", "tool_calls", "length", "content_filter"):
+            logger.debug(f"Non-standard finish_reason '{finish_reason}', mapping to 'stop'")
+            finish_reason = "stop"
+
+        return LLMResponse(
+            content=message.get("content") or "",
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            usage=usage,
+            reasoning_content=message.get("reasoning_content"),
+        )
+
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
         choice = response.choices[0]

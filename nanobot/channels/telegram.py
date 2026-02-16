@@ -188,27 +188,33 @@ class TelegramChannel(BaseChannel):
         self._stop_typing(msg.chat_id)
         
         try:
-            # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
-            # Convert markdown to Telegram HTML
-            html_content = _markdown_to_telegram_html(msg.content)
-            await self._app.bot.send_message(
-                chat_id=chat_id,
-                text=html_content,
-                parse_mode="HTML"
-            )
         except ValueError:
             logger.error(f"Invalid chat_id: {msg.chat_id}")
-        except Exception as e:
-            # Fallback to plain text if HTML parsing fails
-            logger.warning(f"HTML parse failed, falling back to plain text: {e}")
+            return
+
+        # Telegram max message length is 4096 characters; split if needed
+        max_len = 4096
+        content = msg.content
+        chunks = [content[i:i + max_len] for i in range(0, len(content), max_len)]
+
+        for chunk in chunks:
             try:
+                html_content = _markdown_to_telegram_html(chunk)
                 await self._app.bot.send_message(
-                    chat_id=int(msg.chat_id),
-                    text=msg.content
+                    chat_id=chat_id,
+                    text=html_content,
+                    parse_mode="HTML"
                 )
-            except Exception as e2:
-                logger.error(f"Error sending Telegram message: {e2}")
+            except Exception:
+                # Fallback to plain text if HTML parsing fails
+                try:
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=chunk
+                    )
+                except Exception as e2:
+                    logger.error(f"Error sending Telegram message: {e2}")
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""

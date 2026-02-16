@@ -31,9 +31,29 @@ class MCPToolWrapper(Tool):
     def parameters(self) -> dict[str, Any]:
         return self._parameters
 
+    MCP_TOOL_TIMEOUT = 120  # seconds
+
     async def execute(self, **kwargs: Any) -> str:
+        import asyncio
         from mcp import types
-        result = await self._session.call_tool(self._original_name, arguments=kwargs)
+
+        # Filter to only params defined in schema (prevents additionalProperties errors)
+        allowed = set(self._parameters.get("properties", {}).keys())
+        if allowed:
+            kwargs = {k: v for k, v in kwargs.items() if k in allowed}
+
+        try:
+            result = await asyncio.wait_for(
+                self._session.call_tool(self._original_name, arguments=kwargs),
+                timeout=self.MCP_TOOL_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"MCP tool '{self._original_name}' timed out after {self.MCP_TOOL_TIMEOUT}s")
+            return f"Error: MCP tool call timed out after {self.MCP_TOOL_TIMEOUT}s"
+        except asyncio.CancelledError:
+            return "Error: MCP tool call cancelled (server shutting down)"
+        except Exception as e:
+            return f"Error: MCP tool call failed: {e}"
         parts = []
         for block in result.content:
             if isinstance(block, types.TextContent):
@@ -59,8 +79,14 @@ async def connect_mcp_servers(
                 read, write = await stack.enter_async_context(stdio_client(params))
             elif cfg.url:
                 from mcp.client.streamable_http import streamable_http_client
+                http_client = None
+                if cfg.headers:
+                    import httpx
+                    http_client = await stack.enter_async_context(
+                        httpx.AsyncClient(headers=cfg.headers)
+                    )
                 read, write, _ = await stack.enter_async_context(
-                    streamable_http_client(cfg.url)
+                    streamable_http_client(cfg.url, http_client=http_client)
                 )
             else:
                 logger.warning(f"MCP server '{name}': no command or url configured, skipping")

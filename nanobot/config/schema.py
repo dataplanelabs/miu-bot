@@ -13,6 +13,16 @@ class WhatsAppConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
 
 
+class ZaloConfig(BaseModel):
+    """Zalo channel configuration."""
+    enabled: bool = False
+    bridge_url: str = "ws://localhost:3002"
+    bridge_token: str = ""
+    allow_from: list[str] = Field(default_factory=list)  # Allowed Zalo user IDs
+    respond_to_groups: list[str] = Field(default_factory=list)  # Group IDs to respond in (empty = none)
+    require_mention_in_groups: bool = True  # Only respond in groups when @mentioned
+
+
 class TelegramConfig(BaseModel):
     """Telegram channel configuration."""
     enabled: bool = False
@@ -145,6 +155,7 @@ class QQConfig(BaseModel):
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
+    zalo: ZaloConfig = Field(default_factory=ZaloConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
@@ -222,6 +233,7 @@ class MCPServerConfig(BaseModel):
     args: list[str] = Field(default_factory=list)  # Stdio: command arguments
     env: dict[str, str] = Field(default_factory=dict)  # Stdio: extra env vars
     url: str = ""  # HTTP: streamable HTTP endpoint URL
+    headers: dict[str, str] = Field(default_factory=dict)  # HTTP: custom headers (e.g. Authorization)
 
 
 class ToolsConfig(BaseModel):
