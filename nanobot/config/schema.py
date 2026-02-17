@@ -20,6 +20,7 @@ class ZaloConfig(BaseModel):
     bridge_token: str = ""
     allow_from: list[str] = Field(default_factory=list)  # Allowed Zalo user IDs
     respond_to_groups: list[str] = Field(default_factory=list)  # Group IDs to respond in (empty = none)
+    respond_to_users: list[str] = Field(default_factory=list)  # User IDs for DMs (empty = all)
     require_mention_in_groups: bool = True  # Only respond in groups when @mentioned
 
 

@@ -44,6 +44,7 @@ class ZaloChannel(BaseChannel):
         self._ws = None
         self._connected = False
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
+        self._thread_types: dict[str, int] = {}  # chat_id -> thread_type (1=user, 2=group)
 
     async def start(self) -> None:
         """Start the Zalo channel by connecting to the bridge."""
@@ -101,15 +102,20 @@ class ZaloChannel(BaseChannel):
         if task:
             task.cancel()
 
+    TYPING_MAX_DURATION = 300  # Safety net: auto-stop typing after 5 min
+
     async def _typing_loop(self, chat_id: str, thread_type: int) -> None:
-        """Repeatedly send typing indicator until cancelled."""
+        """Repeatedly send typing indicator until cancelled or max duration reached."""
         try:
-            while True:
+            elapsed = 0
+            while elapsed < self.TYPING_MAX_DURATION:
                 if self._ws and self._connected:
                     await self._ws.send(json.dumps({
                         "type": "typing", "to": chat_id, "threadType": thread_type,
                     }))
                 await asyncio.sleep(3)  # Zalo typing indicator lasts ~5s
+                elapsed += 3
+            logger.warning(f"Typing timeout for {chat_id} after {self.TYPING_MAX_DURATION}s")
         except asyncio.CancelledError:
             pass
         except Exception:
@@ -124,7 +130,11 @@ class ZaloChannel(BaseChannel):
             return
 
         try:
-            thread_type = msg.metadata.get("thread_type", 1) if msg.metadata else 1
+            # Use metadata thread_type, fall back to cached type from received messages
+            if msg.metadata and msg.metadata.get("thread_type"):
+                thread_type = msg.metadata["thread_type"]
+            else:
+                thread_type = self._thread_types.get(msg.chat_id, 1)
             chunks = self._split_message(msg.content, self.ZALO_MAX_CHARS)
 
             for chunk in chunks:
@@ -139,7 +149,7 @@ class ZaloChannel(BaseChannel):
                 if len(chunks) > 1:
                     await asyncio.sleep(0.3)
 
-            logger.debug(f"Zalo send: to={msg.chat_id} chunks={len(chunks)} threadType={thread_type}")
+            logger.info(f"Zalo send: to={msg.chat_id} chunks={len(chunks)} threadType={thread_type}")
         except Exception as e:
             logger.error(f"Error sending Zalo message: {e}")
 
@@ -194,10 +204,23 @@ class ZaloChannel(BaseChannel):
             is_group = data.get("threadType") == "group"
             thread_type = 2 if is_group else 1
 
+            # Cache thread type for outbound message routing
+            self._thread_types[thread_id] = thread_type
+
             # In groups, only consume messages from allowed groups
             if is_group and self.config.respond_to_groups:
                 if thread_id not in self.config.respond_to_groups:
                     return
+
+            # In DMs, only consume messages from allowed users (empty = all)
+            if not is_group and self.config.respond_to_users:
+                if sender_id not in self.config.respond_to_users:
+                    return
+
+            # Check allow_from before starting typing to prevent stuck typing
+            if not self.is_allowed(sender_id):
+                logger.debug(f"Zalo: sender {sender_id} not in allowFrom, skipping")
+                return
 
             # In groups, observe all messages but only reply when @mentioned
             is_mentioned = data.get("isMentioned", False)
