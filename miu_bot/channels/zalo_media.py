@@ -18,18 +18,31 @@ _MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
 def normalize_content(content: Any) -> str:
-    """Normalize content payload to text string."""
+    """Normalize content payload to text string.
+
+    Zalo sends media as dicts with ``href``/``url`` keys.  Convert these
+    to a compact human-readable form so they don't bloat LLM context.
+    """
     if isinstance(content, str):
         return content.strip()
     if content is None:
         return ""
     if isinstance(content, list):
-        parts = [str(item).strip() for item in content if item]
+        parts = [normalize_content(item) for item in content if item]
         return "\n".join(parts).strip()
-    try:
-        return json.dumps(content, ensure_ascii=False)
-    except TypeError:
-        return str(content)
+    if isinstance(content, dict):
+        # Zalo image/file: {"title": "...", "description": "...", "href": "..."}
+        url = content.get("href") or content.get("url") or ""
+        desc = content.get("description") or content.get("title") or ""
+        if url:
+            label = desc if desc else "media"
+            return f"[Sent {label}: {url}]"
+        # Fallback for other dicts
+        try:
+            return json.dumps(content, ensure_ascii=False)
+        except TypeError:
+            return str(content)
+    return str(content)
 
 
 def extract_media_markers(content: str) -> tuple[list[dict], str]:
