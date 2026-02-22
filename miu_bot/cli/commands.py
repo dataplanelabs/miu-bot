@@ -573,7 +573,7 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
                         f"Dispatching to Hatchet: bot={msg.bot_name} "
                         f"ws={workspace_id[:8]} session={session.id[:8]}"
                     )
-                    await hatchet.event.push("message:received", event_payload)
+                    hatchet.event.push("message:received", event_payload)
                 except asyncio.TimeoutError:
                     continue
                 except asyncio.CancelledError:

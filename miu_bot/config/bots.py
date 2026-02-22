@@ -68,6 +68,9 @@ def _resolve_env_fields(data: dict[str, Any]) -> dict[str, Any]:
     for key, value in data.items():
         if key.endswith("_env"):
             target_key = key[:-4]  # Remove '_env' suffix
+            if not value:
+                # Skip empty _env fields (default Pydantic values)
+                continue
             if isinstance(value, dict):
                 # headers_env: {Authorization: ENV_VAR_NAME}
                 resolved[target_key] = {
