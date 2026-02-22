@@ -2,19 +2,19 @@
 set -euo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-IMAGE_NAME="miubot-test"
+IMAGE_NAME="miu-bot-test"
 
 echo "=== Building Docker image ==="
 docker build -t "$IMAGE_NAME" .
 
 echo ""
 echo "=== Running 'miubot onboard' ==="
-docker run --name miubot-test-run "$IMAGE_NAME" onboard
+docker run --name miu-bot-test-run "$IMAGE_NAME" onboard
 
 echo ""
 echo "=== Running 'miubot status' ==="
-STATUS_OUTPUT=$(docker commit miubot-test-run miubot-test-onboarded > /dev/null && \
-    docker run --rm miubot-test-onboarded status 2>&1) || true
+STATUS_OUTPUT=$(docker commit miu-bot-test-run miu-bot-test-onboarded > /dev/null && \
+    docker run --rm miu-bot-test-onboarded status 2>&1) || true
 
 echo "$STATUS_OUTPUT"
 
@@ -31,7 +31,7 @@ check() {
     fi
 }
 
-check "miubot Status"
+check "miu-bot Status"
 check "Config:"
 check "Workspace:"
 check "Model:"
@@ -50,7 +50,7 @@ fi
 # Cleanup
 echo ""
 echo "=== Cleanup ==="
-docker rm -f miubot-test-run 2>/dev/null || true
-docker rmi -f miubot-test-onboarded 2>/dev/null || true
+docker rm -f miu-bot-test-run 2>/dev/null || true
+docker rmi -f miu-bot-test-onboarded 2>/dev/null || true
 docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
 echo "Done."

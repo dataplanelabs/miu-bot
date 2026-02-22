@@ -58,7 +58,7 @@ export class WhatsAppClient {
       version,
       logger,
       printQRInTerminal: false,
-      browser: ['miubot', 'cli', VERSION],
+      browser: ['miu-bot', 'cli', VERSION],
       syncFullHistory: false,
       markOnlineOnConnect: false,
     });

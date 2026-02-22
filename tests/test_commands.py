@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from miubot.cli.commands import app
+from miu_bot.cli.commands import app
 
 runner = CliRunner()
 
@@ -13,10 +13,10 @@ runner = CliRunner()
 @pytest.fixture
 def mock_paths():
     """Mock config/workspace paths for test isolation."""
-    with patch("miubot.config.loader.get_config_path") as mock_cp, \
-         patch("miubot.config.loader.save_config") as mock_sc, \
-         patch("miubot.config.loader.load_config") as mock_lc, \
-         patch("miubot.utils.helpers.get_workspace_path") as mock_ws:
+    with patch("miu_bot.config.loader.get_config_path") as mock_cp, \
+         patch("miu_bot.config.loader.save_config") as mock_sc, \
+         patch("miu_bot.config.loader.load_config") as mock_lc, \
+         patch("miu_bot.utils.helpers.get_workspace_path") as mock_ws:
 
         base_dir = Path("./test_onboard_data")
         if base_dir.exists():

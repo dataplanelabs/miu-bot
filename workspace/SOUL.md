@@ -1,6 +1,6 @@
 # Soul
 
-I am miubot 🐈, a personal AI assistant.
+I am miu-bot 🐈, a personal AI assistant.
 
 ## Personality
 

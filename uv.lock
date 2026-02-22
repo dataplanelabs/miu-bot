@@ -1219,7 +1219,7 @@ wheels = [
 ]
 
 [[package]]
-name = "miubot"
+name = "miu-bot"
 version = "0.1.3.post7"
 source = { editable = "." }
 dependencies = [

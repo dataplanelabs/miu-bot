@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in miubot, please report it by:
+If you discover a security vulnerability in miu-bot, please report it by:
 
 1. **DO NOT** open a public GitHub issue
 2. Create a private security advisory on GitHub or contact the repository maintainers
@@ -22,13 +22,13 @@ We aim to respond to security reports within 48 hours.
 
 ```bash
 # ✅ Good: Store in config file with restricted permissions
-chmod 600 ~/.miubot/config.json
+chmod 600 ~/.miu-bot/config.json
 
 # ❌ Bad: Hardcoding keys in code or committing them
 ```
 
 **Recommendations:**
-- Store API keys in `~/.miubot/config.json` with file permissions set to `0600`
+- Store API keys in `~/.miu-bot/config.json` with file permissions set to `0600`
 - Consider using environment variables for sensitive keys
 - Use OS keyring/credential manager for production deployments
 - Rotate API keys regularly
@@ -67,7 +67,7 @@ The `exec` tool can execute shell commands. While dangerous command patterns are
 - ✅ Review all tool usage in agent logs
 - ✅ Understand what commands the agent is running
 - ✅ Use a dedicated user account with limited privileges
-- ✅ Never run miubot as root
+- ✅ Never run miu-bot as root
 - ❌ Don't disable security checks
 - ❌ Don't run on systems with sensitive data without careful review
 
@@ -82,7 +82,7 @@ The `exec` tool can execute shell commands. While dangerous command patterns are
 
 File operations have path traversal protection, but:
 
-- ✅ Run miubot with a dedicated user account
+- ✅ Run miu-bot with a dedicated user account
 - ✅ Use filesystem permissions to protect sensitive directories
 - ✅ Regularly audit file operations in logs
 - ❌ Don't give unrestricted access to sensitive files
@@ -97,7 +97,7 @@ File operations have path traversal protection, but:
 **WhatsApp Bridge:**
 - The bridge binds to `127.0.0.1:3001` (localhost only, not accessible from external network)
 - Set `bridgeToken` in config to enable shared-secret authentication between Python and Node.js
-- Keep authentication data in `~/.miubot/whatsapp-auth` secure (mode 0700)
+- Keep authentication data in `~/.miu-bot/whatsapp-auth` secure (mode 0700)
 
 ### 6. Dependency Security
 
@@ -109,7 +109,7 @@ pip install pip-audit
 pip-audit
 
 # Update to latest secure versions
-pip install --upgrade miubot
+pip install --upgrade miu-bot
 ```
 
 For Node.js dependencies (WhatsApp bridge):
@@ -123,7 +123,7 @@ npm audit fix
 - Keep `litellm` updated to the latest version for security fixes
 - We've updated `ws` to `>=8.17.1` to fix DoS vulnerability
 - Run `pip-audit` or `npm audit` regularly
-- Subscribe to security advisories for miubot and its dependencies
+- Subscribe to security advisories for miu-bot and its dependencies
 
 ### 7. Production Deployment
 
@@ -133,26 +133,26 @@ For production use:
    ```bash
    # Run in a container or VM
    docker run --rm -it python:3.11
-   pip install miubot
+   pip install miu-bot
    ```
 
 2. **Use a Dedicated User**
    ```bash
-   sudo useradd -m -s /bin/bash miubot
-   sudo -u miubot miubot gateway
+   sudo useradd -m -s /bin/bash miu-bot
+   sudo -u miu-bot miu-bot gateway
    ```
 
 3. **Set Proper Permissions**
    ```bash
-   chmod 700 ~/.miubot
-   chmod 600 ~/.miubot/config.json
-   chmod 700 ~/.miubot/whatsapp-auth
+   chmod 700 ~/.miu-bot
+   chmod 600 ~/.miu-bot/config.json
+   chmod 700 ~/.miu-bot/whatsapp-auth
    ```
 
 4. **Enable Logging**
    ```bash
    # Configure log monitoring
-   tail -f ~/.miubot/logs/miubot.log
+   tail -f ~/.miu-bot/logs/miu-bot.log
    ```
 
 5. **Use Rate Limiting**
@@ -163,7 +163,7 @@ For production use:
 6. **Regular Updates**
    ```bash
    # Check for updates weekly
-   pip install --upgrade miubot
+   pip install --upgrade miu-bot
    ```
 
 ### 8. Development vs Production
@@ -185,7 +185,7 @@ For production use:
 
 - **Logs may contain sensitive information** - secure log files appropriately
 - **LLM providers see your prompts** - review their privacy policies
-- **Chat history is stored locally** - protect the `~/.miubot` directory
+- **Chat history is stored locally** - protect the `~/.miu-bot` directory
 - **API keys are in plain text** - use OS keyring for production
 
 ### 10. Incident Response
@@ -195,7 +195,7 @@ If you suspect a security breach:
 1. **Immediately revoke compromised API keys**
 2. **Review logs for unauthorized access**
    ```bash
-   grep "Access denied" ~/.miubot/logs/miubot.log
+   grep "Access denied" ~/.miu-bot/logs/miu-bot.log
    ```
 3. **Check for unexpected file modifications**
 4. **Rotate all credentials**
@@ -238,7 +238,7 @@ If you suspect a security breach:
 
 ## Security Checklist
 
-Before deploying miubot:
+Before deploying miu-bot:
 
 - [ ] API keys stored securely (not in code)
 - [ ] Config file permissions set to 0600
@@ -256,8 +256,8 @@ Before deploying miubot:
 **Last Updated**: 2026-02-03
 
 For the latest security updates and announcements, check:
-- GitHub Security Advisories: https://github.com/dataplanelabs/miubot/security/advisories
-- Release Notes: https://github.com/dataplanelabs/miubot/releases
+- GitHub Security Advisories: https://github.com/dataplanelabs/miu-bot/security/advisories
+- Release Notes: https://github.com/dataplanelabs/miu-bot/releases
 
 ## License
 

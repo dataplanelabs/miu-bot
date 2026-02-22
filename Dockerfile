@@ -16,12 +16,12 @@ WORKDIR /app
 
 # Install Python dependencies first (cached layer)
 COPY pyproject.toml README.md LICENSE ./
-RUN mkdir -p miubot bridge && touch miubot/__init__.py && \
+RUN mkdir -p miu_bot bridge && touch miu_bot/__init__.py && \
     uv pip install --system --no-cache . && \
-    rm -rf miubot bridge
+    rm -rf miu_bot bridge
 
 # Copy the full source and install
-COPY miubot/ miubot/
+COPY miu_bot/ miu_bot/
 COPY bridge/ bridge/
 RUN uv pip install --system --no-cache .
 
@@ -31,7 +31,7 @@ RUN npm install && npm run build
 WORKDIR /app
 
 # Create config directory
-RUN mkdir -p /root/.miubot
+RUN mkdir -p /root/.miu-bot
 
 # Gateway default port
 EXPOSE 18790

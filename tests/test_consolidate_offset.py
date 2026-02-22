@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from miubot.session.manager import Session, SessionManager
+from miu_bot.session.manager import Session, SessionManager
 
 # Test constants
 MEMORY_WINDOW = 50

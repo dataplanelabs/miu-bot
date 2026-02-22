@@ -1,11 +1,11 @@
 [project]
-name = "miubot"
+name = "miu-bot"
 version = "0.1.3.post7"
 description = "A lightweight personal AI assistant framework"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "miubot contributors"}
+    {name = "miu-bot contributors"}
 ]
 keywords = ["ai", "agent", "chatbot"]
 classifiers = [
@@ -51,36 +51,36 @@ dev = [
 ]
 
 [project.scripts]
-miubot = "miubot.cli.commands:app"
+miubot = "miu_bot.cli.commands:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["miubot"]
+packages = ["miu_bot"]
 
 [tool.hatch.build.targets.wheel.sources]
-"miubot" = "miubot"
+"miu_bot" = "miu_bot"
 
 # Include non-Python files in skills
 [tool.hatch.build]
 include = [
-    "miubot/**/*.py",
-    "miubot/skills/**/*.md",
-    "miubot/skills/**/*.sh",
+    "miu_bot/**/*.py",
+    "miu_bot/skills/**/*.md",
+    "miu_bot/skills/**/*.sh",
 ]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "miubot/",
+    "miu_bot/",
     "bridge/",
     "README.md",
     "LICENSE",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]
-"bridge" = "miubot/bridge"
+"bridge" = "miu_bot/bridge"
 
 [tool.ruff]
 line-length = 100

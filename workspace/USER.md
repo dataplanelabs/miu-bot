@@ -46,4 +46,4 @@ Information about the user to help personalize interactions.
 
 ---
 
-*Edit this file to customize miubot's behavior for your needs.*
+*Edit this file to customize miu-bot's behavior for your needs.*

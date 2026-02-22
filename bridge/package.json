@@ -1,7 +1,7 @@
 {
-  "name": "miubot-whatsapp-bridge",
+  "name": "miu-bot-whatsapp-bridge",
   "version": "0.1.0",
-  "description": "WhatsApp bridge for miubot using Baileys",
+  "description": "WhatsApp bridge for miu-bot using Baileys",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

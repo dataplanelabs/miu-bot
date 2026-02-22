@@ -1,7 +1,7 @@
 from typing import Any
 
-from miubot.agent.tools.base import Tool
-from miubot.agent.tools.registry import ToolRegistry
+from miu_bot.agent.tools.base import Tool
+from miu_bot.agent.tools.registry import ToolRegistry
 
 
 class SampleTool(Tool):
