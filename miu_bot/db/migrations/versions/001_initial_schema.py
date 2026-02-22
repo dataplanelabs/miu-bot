@@ -23,8 +23,8 @@ def upgrade() -> None:
             identity TEXT NOT NULL DEFAULT '',
             config_overrides JSONB NOT NULL DEFAULT '{}',
             status TEXT NOT NULL DEFAULT 'active',
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at TIMESTAMP NOT NULL DEFAULT now()
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
     """)
 
@@ -35,8 +35,8 @@ def upgrade() -> None:
             channel TEXT NOT NULL,
             channel_identifier TEXT NOT NULL,
             metadata JSONB NOT NULL DEFAULT '{}',
-            last_consolidated_at TIMESTAMP,
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
+            last_consolidated_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             UNIQUE (workspace_id, channel, channel_identifier)
         )
     """)
@@ -50,7 +50,7 @@ def upgrade() -> None:
             content TEXT NOT NULL DEFAULT '',
             metadata JSONB NOT NULL DEFAULT '{}',
             consolidated BOOLEAN NOT NULL DEFAULT FALSE,
-            created_at TIMESTAMP NOT NULL DEFAULT now()
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
     """)
     op.execute("CREATE INDEX idx_messages_session ON messages(session_id, created_at)")
@@ -66,7 +66,7 @@ def upgrade() -> None:
             content TEXT NOT NULL DEFAULT '',
             embedding vector(1536),
             source_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
-            created_at TIMESTAMP NOT NULL DEFAULT now()
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
     """)
     op.execute("CREATE INDEX idx_memories_workspace ON memories(workspace_id, category)")
