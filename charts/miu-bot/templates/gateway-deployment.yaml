@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: miubot-gateway
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "miu-bot.labels" . | nindent 4 }}
+    {{- include "miu-bot.gateway.selectorLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.gateway.replicas }}
+  selector:
+    matchLabels:
+      {{- include "miu-bot.gateway.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "miu-bot.gateway.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: gateway
+          image: {{ include "miu-bot.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["miubot", "serve", "--role", "gateway"]
+          ports:
+            - containerPort: {{ .Values.gateway.port }}
+              name: http
+          envFrom:
+            - configMapRef:
+                name: miubot-config
+            - secretRef:
+                name: {{ .Values.existingSecret }}
+          {{- with .Values.gateway.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.gateway.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: miubot-gateway
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "miu-bot.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "miu-bot.gateway.selectorLabels" . | nindent 4 }}
+  ports:
+    - port: {{ .Values.gateway.port }}
+      targetPort: {{ .Values.gateway.port }}
+      name: http
+  type: ClusterIP

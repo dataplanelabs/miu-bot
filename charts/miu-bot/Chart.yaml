@@ -1,0 +1,9 @@
+apiVersion: v2
+name: miu-bot
+description: MiuBot - AI-powered chatbot gateway and worker
+type: application
+version: 0.3.0
+appVersion: "0.3.0"
+maintainers:
+  - name: dataplanelabs
+    url: https://github.com/dataplanelabs/miu-bot

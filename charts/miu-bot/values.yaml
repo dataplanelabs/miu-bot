@@ -1,0 +1,64 @@
+# -- Namespace name
+namespace: miubot
+
+# -- Container image configuration
+image:
+  repository: harbor.dataplanelabs.com/dataplanelabs/miu-bot
+  tag: ""  # Defaults to Chart.appVersion
+  pullPolicy: IfNotPresent
+
+# -- Image pull secrets (Harbor reflector provides harbor-dockerconfig)
+imagePullSecrets:
+  - name: harbor-dockerconfig
+
+# -- Existing secret name for env injection (SOPS-encrypted in infra repo)
+existingSecret: miubot-secrets
+
+# -- ConfigMap values (non-secret environment variables)
+config:
+  MIU_BOT_BACKEND__TYPE: "postgres"
+  MIU_BOT_GATEWAY__HOST: "0.0.0.0"
+  MIU_BOT_GATEWAY__PORT: "18790"
+  MIU_BOT_AGENTS__DEFAULTS__MODEL: "anthropic/claude-opus-4-5"
+
+# -- Gateway component
+gateway:
+  replicas: 2
+  port: 18790
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 18790
+    initialDelaySeconds: 10
+    periodSeconds: 30
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 18790
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+# -- Worker component
+worker:
+  replicas: 3
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "200m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+# -- Horizontal Pod Autoscaler for worker
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70

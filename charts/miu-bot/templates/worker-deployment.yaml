@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: miubot-worker
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "miu-bot.labels" . | nindent 4 }}
+    {{- include "miu-bot.worker.selectorLabels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.worker.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "miu-bot.worker.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "miu-bot.worker.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: {{ include "miu-bot.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["miubot", "serve", "--role", "worker"]
+          envFrom:
+            - configMapRef:
+                name: miubot-config
+            - secretRef:
+                name: {{ .Values.existingSecret }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
