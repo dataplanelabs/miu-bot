@@ -86,9 +86,12 @@ jobs:
 
       - name: Setup Harbor auth
         run: |
-          mkdir -p ~/.docker
+          # Helm OCI uses its own registry config, not ~/.docker/config.json
+          HELM_REG_DIR="${HELM_REGISTRY_CONFIG%/*}"
+          mkdir -p "$HELM_REG_DIR" ~/.docker
           if [ -f "/run/secrets/docker/config.json" ]; then
             cp /run/secrets/docker/config.json ~/.docker/config.json
+            cp /run/secrets/docker/config.json "$HELM_REGISTRY_CONFIG"
             echo "Using pre-mounted Docker credentials"
           else
             echo "${{ secrets.HARBOR_PASSWORD }}" | \
@@ -143,9 +146,12 @@ jobs:
 
       - name: Setup Harbor auth
         run: |
-          mkdir -p ~/.docker
+          # Helm OCI uses its own registry config, not ~/.docker/config.json
+          HELM_REG_DIR="${HELM_REGISTRY_CONFIG%/*}"
+          mkdir -p "$HELM_REG_DIR" ~/.docker
           if [ -f "/run/secrets/docker/config.json" ]; then
             cp /run/secrets/docker/config.json ~/.docker/config.json
+            cp /run/secrets/docker/config.json "$HELM_REGISTRY_CONFIG"
             echo "Using pre-mounted Docker credentials"
           else
             echo "${{ secrets.HARBOR_PASSWORD }}" | \
