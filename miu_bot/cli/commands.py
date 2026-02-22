@@ -431,17 +431,21 @@ def _serve_gateway(port: int, verbose: bool):
     config = load_config()
     bus = MessageBus()
     backend = _create_backend(config)
-
-    if not backend:
-        console.print("[red]Gateway mode requires a backend[/red]")
-        raise typer.Exit(1)
-
     channels = ChannelManager(config, bus)
 
     async def run():
         import uvicorn
         from miu_bot.gateway.app import create_app
         from miu_bot.workspace.resolver import WorkspaceResolver
+
+        nonlocal backend
+        pool = None
+        if not backend:
+            # Postgres backend requires async pool creation
+            from miu_bot.db.pool import create_pool, close_pool
+            from miu_bot.db.postgres import PostgresBackend
+            pool = await create_pool(config.database.url, config.database.min_pool_size, config.database.max_pool_size)
+            backend = PostgresBackend(pool)
 
         resolver = WorkspaceResolver(backend)
         app = create_app(backend, bus)
@@ -481,6 +485,9 @@ def _serve_gateway(port: int, verbose: bool):
         finally:
             await channels.stop_all()
             server.should_exit = True
+            if pool:
+                from miu_bot.db.pool import close_pool
+                await close_pool(pool)
 
     asyncio.run(run())
 
