@@ -93,9 +93,15 @@ jobs:
             cp /run/secrets/docker/config.json "$HELM_REGISTRY_CONFIG"
             echo "Using pre-mounted Docker credentials"
           else
-            echo "${{ secrets.HARBOR_PASSWORD }}" | \
+            USERNAME="${HARBOR_USERNAME:-${{ secrets.HARBOR_USERNAME }}}"
+            PASSWORD="${HARBOR_PASSWORD:-${{ secrets.HARBOR_PASSWORD }}}"
+            if [ -z "$USERNAME" ] || [ -z "$PASSWORD" ]; then
+              echo "::error::Harbor credentials not found (env vars or secrets)"
+              exit 1
+            fi
+            echo "$PASSWORD" | \
             helm registry login harbor.dataplanelabs.com \
-              --username ${{ secrets.HARBOR_USERNAME }} \
+              --username "$USERNAME" \
               --password-stdin
           fi
 
@@ -152,9 +158,15 @@ jobs:
             cp /run/secrets/docker/config.json "$HELM_REGISTRY_CONFIG"
             echo "Using pre-mounted Docker credentials"
           else
-            echo "${{ secrets.HARBOR_PASSWORD }}" | \
+            USERNAME="${HARBOR_USERNAME:-${{ secrets.HARBOR_USERNAME }}}"
+            PASSWORD="${HARBOR_PASSWORD:-${{ secrets.HARBOR_PASSWORD }}}"
+            if [ -z "$USERNAME" ] || [ -z "$PASSWORD" ]; then
+              echo "::error::Harbor credentials not found (env vars or secrets)"
+              exit 1
+            fi
+            echo "$PASSWORD" | \
             helm registry login harbor.dataplanelabs.com \
-              --username ${{ secrets.HARBOR_USERNAME }} \
+              --username "$USERNAME" \
               --password-stdin
           fi
 
