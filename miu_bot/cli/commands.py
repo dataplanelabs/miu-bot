@@ -536,7 +536,7 @@ def _serve_worker(verbose: bool):
         logger.info("Connection pool closed")
 
     # Define workflows
-    from hatchet_sdk.runnables.types import ConcurrencyExpression
+    from hatchet_sdk.runnables.types import ConcurrencyExpression, ConcurrencyLimitStrategy
 
     process_msg_wf = hatchet.workflow(
         name="process-message",
@@ -544,6 +544,7 @@ def _serve_worker(verbose: bool):
         concurrency=ConcurrencyExpression(
             expression="input.session_id",
             max_runs=1,
+            limit_strategy=ConcurrencyLimitStrategy.GROUP_ROUND_ROBIN,
         ),
     )
 
