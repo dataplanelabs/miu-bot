@@ -25,6 +25,9 @@ config:
 gateway:
   replicas: 2
   port: 18790
+  # -- Graceful shutdown: let K8s remove from Service endpoints before SIGTERM
+  terminationGracePeriodSeconds: 30
+  preStopSleepSeconds: 5
   resources:
     requests:
       memory: "256Mi"
@@ -48,6 +51,8 @@ gateway:
 # -- Worker component
 worker:
   replicas: 3
+  # -- Graceful shutdown: allow in-flight LLM calls to complete (up to 2 min)
+  terminationGracePeriodSeconds: 120
   resources:
     requests:
       memory: "512Mi"

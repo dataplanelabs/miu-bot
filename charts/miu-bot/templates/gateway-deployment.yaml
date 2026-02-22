@@ -8,6 +8,11 @@ metadata:
     app.kubernetes.io/component: gateway
 spec:
   replicas: {{ .Values.gateway.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       {{- include "miu-bot.gateway.selectorLabels" . | nindent 6 }}
@@ -16,11 +21,17 @@ spec:
       labels:
         {{- include "miu-bot.labels" . | nindent 8 }}
         {{- include "miu-bot.gateway.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.bots }}
+        checksum/bots: {{ include (print $.Template.BasePath "/bots-configmap.yaml") . | sha256sum }}
+        {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.gateway.terminationGracePeriodSeconds | default 30 }}
       containers:
         - name: gateway
           image: {{ include "miu-bot.image" . }}
@@ -44,6 +55,10 @@ spec:
               mountPath: /etc/miu-bot
               readOnly: true
           {{- end }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "{{ .Values.gateway.preStopSleepSeconds | default 5 }}"]
           {{- with .Values.gateway.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}

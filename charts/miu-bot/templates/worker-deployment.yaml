@@ -10,6 +10,11 @@ spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.worker.replicas }}
   {{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       {{- include "miu-bot.worker.selectorLabels" . | nindent 6 }}
@@ -18,11 +23,14 @@ spec:
       labels:
         {{- include "miu-bot.labels" . | nindent 8 }}
         {{- include "miu-bot.worker.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds | default 120 }}
       containers:
         - name: worker
           image: {{ include "miu-bot.image" . }}
