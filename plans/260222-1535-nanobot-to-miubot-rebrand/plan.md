@@ -1,7 +1,7 @@
 ---
 title: "Rebrand nanobot to miubot"
 description: "Comprehensive rename of nanobot to miubot across entire codebase, fresh venv, test, commit and push"
-status: pending
+status: complete
 priority: P1
 effort: 2h
 branch: main
@@ -41,11 +41,11 @@ Full project rename from "nanobot" → "miubot". Covers package name, module dir
 
 | # | Phase | Status | Est |
 |---|-------|--------|-----|
-| 1 | [Directory & file renames](phase-01-directory-renames.md) | pending | 10m |
-| 2 | [Global content replacement](phase-02-content-replacement.md) | pending | 30m |
-| 3 | [Tooling setup (mise + uv)](phase-03-tooling-setup.md) | pending | 15m |
-| 4 | [Validation](phase-04-validation.md) | pending | 20m |
-| 5 | [Commit & push](phase-05-commit-push.md) | pending | 5m |
+| 1 | [Directory & file renames](phase-01-directory-renames.md) | complete | 10m |
+| 2 | [Global content replacement](phase-02-content-replacement.md) | complete | 30m |
+| 3 | [Tooling setup (mise + uv)](phase-03-tooling-setup.md) | complete | 15m |
+| 4 | [Validation](phase-04-validation.md) | complete | 20m |
+| 5 | [Commit & push](phase-05-commit-push.md) | complete | 5m |
 
 ## Dependencies
 
