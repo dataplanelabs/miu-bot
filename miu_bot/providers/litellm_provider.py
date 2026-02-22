@@ -159,11 +159,12 @@ class LiteLLMProvider(LLMProvider):
             response = await acompletion(**kwargs)
             return self._parse_response(response)
         except Exception as e:
+            logger.warning(f"LiteLLM failed: {type(e).__name__}: {str(e)[:200]}")
             # Fallback: if litellm can't parse the response (e.g. non-standard
             # finish_reason from Z.ai), make a direct httpx call and parse manually.
             if self.api_base and self.api_key:
                 try:
-                    logger.debug(f"LiteLLM failed ({type(e).__name__}), trying direct HTTP fallback")
+                    logger.debug(f"Trying direct HTTP fallback to {self.api_base}")
                     return await self._direct_chat(kwargs)
                 except Exception as fallback_err:
                     logger.error(f"Direct HTTP fallback also failed: {fallback_err}")
@@ -197,6 +198,8 @@ class LiteLLMProvider(LLMProvider):
 
         async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.post(url, headers=headers, json=body)
+            if resp.status_code >= 400:
+                logger.error(f"LLM API error {resp.status_code}: {resp.text[:500]}")
             resp.raise_for_status()
             data = resp.json()
 
