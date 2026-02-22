@@ -89,7 +89,7 @@ class ProcessMessageWorkflow:
             memories_text = "\n".join(m.content for m in memories)
             history = [{"role": m.role, "content": m.content} for m in messages]
 
-            context_builder = ContextBuilder(workspace_path=None)
+            context_builder = ContextBuilder(workspace=None)
             llm_messages = context_builder.build_workspace_messages(
                 identity=identity, memories=memories_text, history=history,
                 current_message=content, channel=channel, chat_id=chat_id,
