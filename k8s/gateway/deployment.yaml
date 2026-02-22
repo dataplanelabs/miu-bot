@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: miubot:latest
+          image: harbor.dataplanelabs.com/dataplanelabs/miu-bot:latest
           command: ["miubot", "serve", "--role", "gateway"]
           ports:
             - containerPort: 18790
