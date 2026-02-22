@@ -559,7 +559,7 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
                         workspace_id, msg.channel, msg.chat_id
                     )
 
-                    await hatchet.event.push("message:received", {
+                    event_payload = {
                         "workspace_id": workspace_id,
                         "session_id": session.id,
                         "channel": msg.channel,
@@ -568,11 +568,18 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
                         "content": msg.content,
                         "metadata": msg.metadata,
                         "bot_name": msg.bot_name,
-                    })
+                    }
+                    logger.info(
+                        f"Dispatching to Hatchet: bot={msg.bot_name} "
+                        f"ws={workspace_id[:8]} session={session.id[:8]}"
+                    )
+                    await hatchet.event.push("message:received", event_payload)
                 except asyncio.TimeoutError:
                     continue
                 except asyncio.CancelledError:
                     break
+                except Exception as e:
+                    logger.error(f"Hatchet dispatch failed: {e}", exc_info=True)
 
         try:
             await asyncio.gather(
@@ -618,7 +625,6 @@ def _serve_worker(verbose: bool):
             config.database.min_pool_size,
             config.database.max_pool_size,
         )
-        logger.info(f"Connection pool created (min={config.database.min_pool_size}, max={config.database.max_pool_size})")
 
         # Fallback provider config from global config (for bots without overrides)
         p = config.get_provider()
@@ -652,17 +658,26 @@ def _serve_worker(verbose: bool):
     async def process_message(input, context):
         from miu_bot.worker.workflows.process_message import ProcessMessageWorkflow
         deps = context.lifespan
-        wf = ProcessMessageWorkflow(
-            backend=deps["backend"],
-            gateway_url=deps["gateway_url"],
-            fallback_model=deps["fallback_model"],
-            fallback_api_key=deps["fallback_api_key"],
-            fallback_api_base=deps["fallback_api_base"],
-            max_tokens=deps["max_tokens"],
-            temperature=deps["temperature"],
-            max_iterations=deps["max_iterations"],
-        )
-        return await wf.process(input.model_dump())
+        input_data = input.model_dump()
+        logger.info(f"Processing message: workspace={input_data.get('workspace_id', '?')[:8]} "
+                     f"bot={input_data.get('bot_name', '?')} channel={input_data.get('channel', '?')}")
+        try:
+            wf = ProcessMessageWorkflow(
+                backend=deps["backend"],
+                gateway_url=deps["gateway_url"],
+                fallback_model=deps["fallback_model"],
+                fallback_api_key=deps["fallback_api_key"],
+                fallback_api_base=deps["fallback_api_base"],
+                max_tokens=deps["max_tokens"],
+                temperature=deps["temperature"],
+                max_iterations=deps["max_iterations"],
+            )
+            result = await wf.process(input_data)
+            logger.info(f"Message processed: status={result.get('status', '?')}")
+            return result
+        except Exception as e:
+            logger.error(f"process_message failed: {type(e).__name__}: {e}", exc_info=True)
+            raise
 
     # Start worker (blocking — creates own event loop)
     worker = hatchet.worker(
