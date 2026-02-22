@@ -3,6 +3,7 @@ FROM python:3.11-slim AS builder
 WORKDIR /app
 COPY pyproject.toml .
 COPY miu_bot/ miu_bot/
+COPY bridge/ bridge/
 RUN pip install --no-cache-dir ".[postgres,hatchet]"
 
 # Runtime stage
