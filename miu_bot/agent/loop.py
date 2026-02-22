@@ -274,11 +274,8 @@ class AgentLoop:
                             del self._session_queues[k]
                     continue
                 except asyncio.CancelledError:
-                    # Only exit if explicitly told to stop; otherwise keep consuming
-                    if not self._running:
-                        break
-                    logger.warning("Agent loop consume interrupted, resuming...")
-                    continue
+                    # Always honour cancellation — swallowing it causes infinite loops
+                    raise
 
                 key = msg.session_key
                 # Create per-session queue and worker if needed (or recreate if stale)
