@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 def create_hatchet_client(config: "HatchetConfig"):
     """Create a Hatchet SDK client from config."""
     from hatchet_sdk import Hatchet
-    from hatchet_sdk.config import ClientConfig
+    from hatchet_sdk.config import ClientConfig, ClientTLSConfig
 
     kwargs = dict(
         server_url=config.api_url,
@@ -20,6 +20,8 @@ def create_hatchet_client(config: "HatchetConfig"):
     )
     if config.grpc_host:
         kwargs["host_port"] = config.grpc_host
+    if config.tls_strategy:
+        kwargs["tls_config"] = ClientTLSConfig(strategy=config.tls_strategy)
 
     client_config = ClientConfig(**kwargs)
     return Hatchet(config=client_config)

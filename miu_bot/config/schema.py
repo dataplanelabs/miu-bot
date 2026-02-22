@@ -223,6 +223,7 @@ class HatchetConfig(BaseModel):
     enabled: bool = False
     api_url: str = "http://localhost:8888"
     grpc_host: str = ""  # gRPC endpoint (e.g. hatchet-engine.hatchet.svc:7070); empty = read from token
+    tls_strategy: str = ""  # "none" for plaintext gRPC, "tls" for TLS, empty = SDK default (tls)
     token: str = ""
     namespace: str = "miubot"
     gateway_url: str = "http://miubot-gateway:18790"  # Internal service URL for worker→gateway calls
