@@ -22,8 +22,8 @@ class WhatsAppChannel(BaseChannel):
     
     name = "whatsapp"
     
-    def __init__(self, config: WhatsAppConfig, bus: MessageBus):
-        super().__init__(config, bus)
+    def __init__(self, config: WhatsAppConfig, bus: MessageBus, bot_name: str = ""):
+        super().__init__(config, bus, bot_name=bot_name)
         self.config: WhatsAppConfig = config
         self._ws = None
         self._connected = False

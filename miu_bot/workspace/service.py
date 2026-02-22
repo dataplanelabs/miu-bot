@@ -38,6 +38,32 @@ class WorkspaceService:
 
         return await self._backend.create_workspace(name, identity, config_overrides)
 
+    async def get_or_create(
+        self,
+        name: str,
+        identity_text: str = "",
+        config_overrides: dict[str, Any] | None = None,
+    ) -> Workspace:
+        """Get existing workspace or create new one. Updates identity/config if changed."""
+        ws = await self._backend.get_workspace_by_name(name)
+        if ws:
+            updates: dict[str, Any] = {}
+            if identity_text and ws.identity != identity_text:
+                updates["identity"] = identity_text
+                logger.info(f"Updating identity for workspace '{name}'")
+            if config_overrides is not None and ws.config_overrides != config_overrides:
+                updates["config_overrides"] = config_overrides
+                logger.info(f"Updating config_overrides for workspace '{name}'")
+            if updates:
+                updated_ws = await self._backend.update_workspace(ws.id, **updates)
+                if updated_ws:
+                    ws = updated_ws
+            return ws
+
+        ws = await self._backend.create_workspace(name, identity_text, config_overrides)
+        logger.info(f"Created workspace '{name}' ({ws.id})")
+        return ws
+
     async def get(self, name: str) -> Workspace | None:
         return await self._backend.get_workspace_by_name(name)
 

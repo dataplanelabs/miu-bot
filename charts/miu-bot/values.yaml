@@ -62,3 +62,26 @@ autoscaling:
   minReplicas: 3
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
+
+# -- Bot definitions (mounted as /etc/miu-bot/bots.yaml in gateway)
+# Secrets referenced via *_env suffix (resolved from existingSecret env vars)
+bots: {}
+# Example:
+#   bots:
+#     miu-assistant:
+#       identity: |
+#         You are Miu, a helpful AI assistant.
+#       provider:
+#         model: openai/gpt-4o
+#         api_key_env: MIU_ASSISTANT_API_KEY
+#         api_base_env: MIU_ASSISTANT_API_BASE
+#       channels:
+#         telegram:
+#           token_env: MIU_ASSISTANT_TG_TOKEN
+#           allow_from: ["989685357"]
+#       tools:
+#         mcp_servers:
+#           web-search:
+#             url: "https://api.z.ai/api/mcp/web_search_prime/mcp"
+#             headers_env:
+#               Authorization: MIU_ASSISTANT_MCP_AUTH

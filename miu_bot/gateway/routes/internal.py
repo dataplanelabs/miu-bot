@@ -22,6 +22,7 @@ class SendRequest(BaseModel):
     chat_id: str
     content: str
     metadata: dict = {}
+    bot_name: str = ""
 
 
 @router.post("/send")
@@ -38,5 +39,6 @@ async def send_message(req: SendRequest, request: Request):
         chat_id=req.chat_id,
         content=req.content,
         metadata=req.metadata,
+        bot_name=req.bot_name,
     ))
     return {"status": "ok"}

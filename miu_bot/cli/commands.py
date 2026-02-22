@@ -6,6 +6,7 @@ import signal
 from pathlib import Path
 import select
 import sys
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -323,6 +324,57 @@ def _create_backend(config):
     return FileBackend()
 
 
+async def _ensure_workspaces(
+    bots: dict[str, Any],
+    workspace_service: Any,
+) -> dict[str, str]:
+    """Ensure workspaces exist for all bots. Returns {bot_name: workspace_id}."""
+    from miu_bot.skills.loader import discover_local_skills, resolve_bot_skills
+    from miu_bot.skills.schema import BotSkillRef
+    from loguru import logger
+
+    workspace_map: dict[str, str] = {}
+    for bot_name, bot_cfg in bots.items():
+        config_overrides: dict[str, Any] = {}
+
+        # Provider config — store *_env references, NOT resolved secrets
+        if bot_cfg.provider.model:
+            config_overrides["provider"] = bot_cfg.provider.model_dump()
+
+        # Tools/MCP config
+        if bot_cfg.tools.mcp_servers:
+            mcp_dict = {}
+            for srv_name, srv_cfg in bot_cfg.tools.mcp_servers.items():
+                mcp_dict[srv_name] = srv_cfg.model_dump(exclude_defaults=True)
+            config_overrides["tools"] = {"mcp_servers": mcp_dict}
+
+        # Skills (resolve from skill refs if present)
+        if bot_cfg.skills:
+            skill_refs = [BotSkillRef.model_validate(s) for s in bot_cfg.skills]
+            resolved_skills = resolve_bot_skills(skill_refs, {}, {})
+            if resolved_skills:
+                config_overrides["skills"] = [
+                    s.model_dump(exclude_defaults=True) for s in resolved_skills
+                ]
+
+        # Channel allowFrom (for reference)
+        channels_cfg = {}
+        for ch_type, ch_cfg in bot_cfg.channels.items():
+            channels_cfg[ch_type] = {"allowFrom": ch_cfg.allow_from}
+        if channels_cfg:
+            config_overrides["channels"] = channels_cfg
+
+        ws = await workspace_service.get_or_create(
+            name=bot_name,
+            identity_text=bot_cfg.identity,
+            config_overrides=config_overrides,
+        )
+        workspace_map[bot_name] = ws.id
+        logger.info(f"Workspace '{bot_name}' → {ws.id[:8]}")
+
+    return workspace_map
+
+
 def _serve_combined(port: int, verbose: bool):
     """Run in combined mode: gateway + agent loop (no Hatchet)."""
     from miu_bot.config.loader import load_config, get_data_dir
@@ -418,11 +470,13 @@ def _serve_combined(port: int, verbose: bool):
     asyncio.run(run())
 
 
-def _serve_gateway(port: int, verbose: bool):
+def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = None):
     """Run in gateway mode: channels + Hatchet event dispatch (no AgentLoop)."""
     from miu_bot.config.loader import load_config
+    from miu_bot.config.bots import load_bots
     from miu_bot.bus.queue import MessageBus
-    from miu_bot.channels.manager import ChannelManager
+    from miu_bot.channels.bot_manager import BotManager
+    from miu_bot.workspace.service import WorkspaceService
     from loguru import logger
 
     _setup_logging(verbose)
@@ -430,26 +484,44 @@ def _serve_gateway(port: int, verbose: bool):
 
     config = load_config()
     bus = MessageBus()
-    backend = _create_backend(config)
-    channels = ChannelManager(config, bus)
+    bots = load_bots(bots_config_path)
+
+    if not bots:
+        console.print("[yellow]No bots configured — running empty gateway[/yellow]")
 
     async def run():
         import uvicorn
         from miu_bot.gateway.app import create_app
-        from miu_bot.workspace.resolver import WorkspaceResolver
 
-        nonlocal backend
+        # Setup backend
         pool = None
+        backend = _create_backend(config)
         if not backend:
-            # Postgres backend requires async pool creation
             from miu_bot.db.pool import create_pool, close_pool
             from miu_bot.db.postgres import PostgresBackend
-            pool = await create_pool(config.database.url, config.database.min_pool_size, config.database.max_pool_size)
+            pool = await create_pool(
+                config.database.url,
+                config.database.min_pool_size,
+                config.database.max_pool_size,
+            )
             backend = PostgresBackend(pool)
 
-        resolver = WorkspaceResolver(backend)
+        # Ensure workspaces exist for all bots
+        workspace_service = WorkspaceService(backend)
+        workspace_map: dict[str, str] = {}
+        if bots:
+            workspace_map = await _ensure_workspaces(bots, workspace_service)
+            console.print(f"[green]✓[/green] {len(workspace_map)} workspace(s) synced")
+
+        # Create bot manager with channel instances
+        bot_mgr = BotManager(bots, bus)
+        if bot_mgr.enabled_channels:
+            console.print(f"[green]✓[/green] Channels: {', '.join(bot_mgr.enabled_channels)}")
+
         app = create_app(backend, bus)
-        uvi_config = uvicorn.Config(app, host=config.gateway.host, port=port, log_level="warning")
+        uvi_config = uvicorn.Config(
+            app, host=config.gateway.host, port=port, log_level="warning"
+        )
         server = uvicorn.Server(uvi_config)
 
         async def dispatch_to_hatchet():
@@ -459,18 +531,43 @@ def _serve_gateway(port: int, verbose: bool):
                 return
             from miu_bot.worker.client import create_hatchet_client
             hatchet = create_hatchet_client(config.hatchet)
+
             while True:
                 try:
-                    msg = await asyncio.wait_for(bus.consume_inbound(), timeout=1.0)
-                    workspace_id = await resolver.resolve(msg.channel, msg.chat_id)
+                    msg = await asyncio.wait_for(
+                        bus.consume_inbound(), timeout=1.0
+                    )
+
+                    # Resolve workspace from bot_name (direct lookup)
+                    if msg.bot_name and msg.bot_name in workspace_map:
+                        workspace_id = workspace_map[msg.bot_name]
+                    else:
+                        # Fallback: old resolver for backward compat
+                        from miu_bot.workspace.resolver import WorkspaceResolver
+                        resolver = WorkspaceResolver(backend)
+                        workspace_id = await resolver.resolve(
+                            msg.channel, msg.chat_id
+                        )
                     if not workspace_id:
+                        logger.warning(
+                            f"No workspace for bot={msg.bot_name} "
+                            f"channel={msg.channel} chat={msg.chat_id}"
+                        )
                         continue
-                    session = await backend.get_or_create_session(workspace_id, msg.channel, msg.chat_id)
+
+                    session = await backend.get_or_create_session(
+                        workspace_id, msg.channel, msg.chat_id
+                    )
+
                     await hatchet.event.push("message:received", {
-                        "workspace_id": workspace_id, "session_id": session.id,
-                        "channel": msg.channel, "chat_id": msg.chat_id,
-                        "sender_id": msg.sender_id, "content": msg.content,
+                        "workspace_id": workspace_id,
+                        "session_id": session.id,
+                        "channel": msg.channel,
+                        "chat_id": msg.chat_id,
+                        "sender_id": msg.sender_id,
+                        "content": msg.content,
                         "metadata": msg.metadata,
+                        "bot_name": msg.bot_name,
                     })
                 except asyncio.TimeoutError:
                     continue
@@ -479,11 +576,13 @@ def _serve_gateway(port: int, verbose: bool):
 
         try:
             await asyncio.gather(
-                channels.start_all(), server.serve(), dispatch_to_hatchet(),
+                bot_mgr.start_all(),
+                server.serve(),
+                dispatch_to_hatchet(),
                 return_exceptions=True,
             )
         finally:
-            await channels.stop_all()
+            await bot_mgr.stop_all()
             server.should_exit = True
             if pool:
                 from miu_bot.db.pool import close_pool
@@ -513,7 +612,6 @@ def _serve_worker(verbose: bool):
     async def lifespan():
         from miu_bot.db.pool import create_pool, close_pool
         from miu_bot.db.postgres import PostgresBackend
-        from miu_bot.agent.tools.registry import ToolRegistry
 
         pool = await create_pool(
             config.database.url,
@@ -521,13 +619,15 @@ def _serve_worker(verbose: bool):
             config.database.max_pool_size,
         )
         logger.info(f"Connection pool created (min={config.database.min_pool_size}, max={config.database.max_pool_size})")
-        provider = _make_provider(config)
+
+        # Fallback provider config from global config (for bots without overrides)
+        p = config.get_provider()
         yield {
             "backend": PostgresBackend(pool),
-            "provider": provider,
-            "tools": ToolRegistry(),
-            "model": config.agents.defaults.model,
             "gateway_url": config.hatchet.gateway_url,
+            "fallback_model": config.agents.defaults.model,
+            "fallback_api_key": p.api_key if p else "",
+            "fallback_api_base": config.get_api_base(),
             "max_tokens": config.agents.defaults.max_tokens,
             "temperature": config.agents.defaults.temperature,
             "max_iterations": config.agents.defaults.max_tool_iterations,
@@ -553,10 +653,13 @@ def _serve_worker(verbose: bool):
         from miu_bot.worker.workflows.process_message import ProcessMessageWorkflow
         deps = context.lifespan
         wf = ProcessMessageWorkflow(
-            backend=deps["backend"], provider=deps["provider"],
-            tools=deps["tools"], model=deps["model"],
+            backend=deps["backend"],
             gateway_url=deps["gateway_url"],
-            max_tokens=deps["max_tokens"], temperature=deps["temperature"],
+            fallback_model=deps["fallback_model"],
+            fallback_api_key=deps["fallback_api_key"],
+            fallback_api_base=deps["fallback_api_base"],
+            max_tokens=deps["max_tokens"],
+            temperature=deps["temperature"],
             max_iterations=deps["max_iterations"],
         )
         return await wf.process(input.model_dump())
@@ -575,13 +678,14 @@ def _serve_worker(verbose: bool):
 def serve(
     role: str = typer.Option("combined", "--role", "-r", help="Role: combined | gateway | worker"),
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    bots_config: Path = typer.Option(None, "--bots-config", help="Path to bots.yaml"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the miubot server (combined, gateway, or worker mode)."""
     if role == "worker":
         _serve_worker(verbose)
     elif role == "gateway":
-        _serve_gateway(port, verbose)
+        _serve_gateway(port, verbose, bots_config_path=bots_config)
     else:
         _serve_combined(port, verbose)
 

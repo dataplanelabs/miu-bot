@@ -19,16 +19,18 @@ class BaseChannel(ABC):
     
     name: str = "base"
     
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(self, config: Any, bus: MessageBus, bot_name: str = ""):
         """
         Initialize the channel.
-        
+
         Args:
             config: Channel-specific configuration.
             bus: The message bus for communication.
+            bot_name: Bot identifier for multi-bot support.
         """
         self.config = config
         self.bus = bus
+        self.bot_name = bot_name
         self._running = False
     
     @abstractmethod
@@ -120,6 +122,7 @@ class BaseChannel(ABC):
             media=media or [],
             metadata=metadata or {},
             observe_only=observe_only,
+            bot_name=self.bot_name,
         )
 
         await self.bus.publish_inbound(msg)

@@ -99,8 +99,9 @@ class TelegramChannel(BaseChannel):
         config: TelegramConfig,
         bus: MessageBus,
         groq_api_key: str = "",
+        bot_name: str = "",
     ):
-        super().__init__(config, bus)
+        super().__init__(config, bus, bot_name=bot_name)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
         self._app: Application | None = None

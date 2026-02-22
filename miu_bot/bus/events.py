@@ -18,24 +18,28 @@ class InboundMessage:
     metadata: dict[str, Any] = field(default_factory=dict)  # Channel-specific data
     observe_only: bool = False  # If True, add to session history but don't generate a response
     workspace_id: str | None = None  # Multi-tenant: resolved workspace
+    bot_name: str = ""  # Bot identifier from bots.yaml
 
     @property
     def session_key(self) -> str:
         """Unique key for session identification."""
         if self.workspace_id:
             return f"{self.workspace_id}:{self.channel}:{self.chat_id}"
+        if self.bot_name:
+            return f"{self.bot_name}:{self.channel}:{self.chat_id}"
         return f"{self.channel}:{self.chat_id}"
 
 
 @dataclass
 class OutboundMessage:
     """Message to send to a chat channel."""
-    
+
     channel: str
     chat_id: str
     content: str
     reply_to: str | None = None
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    bot_name: str = ""  # For routing to correct channel instance
 
 

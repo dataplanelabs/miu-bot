@@ -2,39 +2,38 @@
 
 from __future__ import annotations
 
+from contextlib import AsyncExitStack
 from typing import Any, TYPE_CHECKING
 
 from loguru import logger
 
 if TYPE_CHECKING:
     from miu_bot.db.backend import MemoryBackend
-    from miu_bot.providers.base import LLMProvider
-    from miu_bot.agent.tools.registry import ToolRegistry
 
 
 class ProcessMessageWorkflow:
     """Hatchet workflow for processing a single inbound message.
 
-    Registered with: on_events=["message:received"]
-    Concurrency: key=input.session_id, max_runs=1
+    Per-message: creates provider, tools, MCP from workspace.config_overrides.
     """
 
     def __init__(
         self,
         backend: "MemoryBackend",
-        provider: "LLMProvider",
-        tools: "ToolRegistry",
-        model: str,
         gateway_url: str = "http://localhost:18790",
+        # Fallback defaults (used when workspace has no provider override)
+        fallback_model: str = "anthropic/claude-opus-4-6",
+        fallback_api_key: str = "",
+        fallback_api_base: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
         max_iterations: int = 20,
     ):
         self.backend = backend
-        self.provider = provider
-        self.tools = tools
-        self.model = model
         self.gateway_url = gateway_url
+        self.fallback_model = fallback_model
+        self.fallback_api_key = fallback_api_key
+        self.fallback_api_base = fallback_api_base
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.max_iterations = max_iterations
@@ -44,6 +43,7 @@ class ProcessMessageWorkflow:
         from miu_bot.workspace.identity import parse_identity
         from miu_bot.agent.context import ContextBuilder
         from miu_bot.agent.processor import run_agent_loop
+        from miu_bot.agent.tools.registry import ToolRegistry
         from miu_bot.worker.response import send_response
 
         workspace_id = workflow_input["workspace_id"]
@@ -52,44 +52,141 @@ class ProcessMessageWorkflow:
         chat_id = workflow_input["chat_id"]
         content = workflow_input["content"]
         metadata = workflow_input.get("metadata", {})
+        bot_name = workflow_input.get("bot_name", "")
 
         # Load workspace
         workspace = await self.backend.get_workspace(workspace_id)
         if not workspace or workspace.status != "active":
             return {"status": "skipped", "reason": "workspace_inactive"}
 
-        # Load context
-        messages = await self.backend.get_messages(session_id, limit=50)
-        memories = await self.backend.get_memories(workspace_id)
+        # Create per-workspace provider
+        provider, model = self._create_provider(workspace.config_overrides)
 
-        identity = parse_identity(workspace.identity)
-        memories_text = "\n".join(m.content for m in memories)
-        history = [{"role": m.role, "content": m.content} for m in messages]
+        # Create per-workspace tools (MCP)
+        tools = ToolRegistry()
+        mcp_stack = AsyncExitStack()
+        await mcp_stack.__aenter__()
+        try:
+            # Build augmented prompt from skills
+            augmented_identity = workspace.identity
+            skill_dicts = workspace.config_overrides.get("skills", [])
+            if skill_dicts:
+                from miu_bot.skills.merger import merge_skills_into_prompt
+                from miu_bot.skills.schema import SkillConfig
 
-        context_builder = ContextBuilder(workspace_path=None)
-        llm_messages = context_builder.build_workspace_messages(
-            identity=identity, memories=memories_text, history=history,
-            current_message=content, channel=channel, chat_id=chat_id,
+                skills = [SkillConfig.model_validate(s) for s in skill_dicts]
+                augmented_identity, _, _ = merge_skills_into_prompt(
+                    workspace.identity, skills
+                )
+
+            await self._connect_mcp(workspace.config_overrides, tools, mcp_stack)
+
+            # Load context
+            messages = await self.backend.get_messages(session_id, limit=50)
+            memories = await self.backend.get_memories(workspace_id)
+
+            identity = parse_identity(augmented_identity)
+            memories_text = "\n".join(m.content for m in memories)
+            history = [{"role": m.role, "content": m.content} for m in messages]
+
+            context_builder = ContextBuilder(workspace_path=None)
+            llm_messages = context_builder.build_workspace_messages(
+                identity=identity, memories=memories_text, history=history,
+                current_message=content, channel=channel, chat_id=chat_id,
+            )
+
+            # Run agent loop
+            response_content, tools_used = await run_agent_loop(
+                provider=provider, messages=llm_messages, tools=tools,
+                model=model, temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                max_iterations=self.max_iterations,
+            )
+
+            if response_content is None:
+                response_content = (
+                    "I've completed processing but have no response to give."
+                )
+
+            # Save messages
+            await self.backend.save_message(
+                session_id, "user", content, metadata
+            )
+            await self.backend.save_message(
+                session_id, "assistant", response_content,
+                {"tools_used": tools_used} if tools_used else None,
+            )
+
+            # Send response via gateway (include bot_name for routing)
+            await send_response(
+                self.gateway_url, channel, chat_id,
+                response_content, metadata, bot_name=bot_name,
+            )
+
+            return {"status": "ok", "tools_used": tools_used}
+        finally:
+            await mcp_stack.aclose()
+
+    def _create_provider(
+        self, config_overrides: dict[str, Any]
+    ) -> tuple[Any, str]:
+        """Create LLMProvider from workspace config_overrides.
+
+        Resolves *_env references from os.environ at runtime.
+        Returns (provider, model_string).
+        """
+        from miu_bot.config.bots import _resolve_env_fields
+        from miu_bot.providers.litellm_provider import LiteLLMProvider
+
+        provider_cfg = config_overrides.get("provider", {})
+        # Resolve *_env fields (api_key_env, api_base_env) from worker's env vars
+        resolved = _resolve_env_fields(provider_cfg)
+        model = resolved.get("model", self.fallback_model)
+        api_key = resolved.get("api_key", self.fallback_api_key)
+        api_base = resolved.get("api_base", self.fallback_api_base)
+
+        provider = LiteLLMProvider(
+            api_key=api_key,
+            api_base=api_base,
+            default_model=model,
         )
+        return provider, model
 
-        # Run agent loop
-        response_content, tools_used = await run_agent_loop(
-            provider=self.provider, messages=llm_messages, tools=self.tools,
-            model=self.model, temperature=self.temperature,
-            max_tokens=self.max_tokens, max_iterations=self.max_iterations,
+    async def _connect_mcp(
+        self,
+        config_overrides: dict[str, Any],
+        tools: Any,
+        stack: AsyncExitStack,
+    ) -> None:
+        """Connect HTTP MCP servers from workspace config_overrides.
+
+        V1: HTTP/SSE MCP only — stdio MCP deferred.
+        Resolves *_env references (headers_env) from worker's env vars.
+        """
+        from miu_bot.config.bots import _resolve_env_fields
+        from miu_bot.config.schema import MCPServerConfig
+        from miu_bot.agent.tools.mcp import connect_mcp_servers
+
+        mcp_raw = (
+            config_overrides.get("tools", {}).get("mcp_servers", {})
         )
+        if not mcp_raw:
+            return
 
-        if response_content is None:
-            response_content = "I've completed processing but have no response to give."
+        # Resolve *_env fields and filter to HTTP-only
+        mcp_servers: dict[str, MCPServerConfig] = {}
+        for name, cfg_dict in mcp_raw.items():
+            resolved = _resolve_env_fields(cfg_dict)
+            cfg = MCPServerConfig.model_validate(resolved)
+            # V1: skip stdio MCP servers (no command field)
+            if cfg.url:
+                mcp_servers[name] = cfg
+            elif cfg.command:
+                logger.info(f"Skipping stdio MCP '{name}' (deferred to V2)")
 
-        # Save messages
-        await self.backend.save_message(session_id, "user", content, metadata)
-        await self.backend.save_message(
-            session_id, "assistant", response_content,
-            {"tools_used": tools_used} if tools_used else None,
-        )
-
-        # Send response via gateway
-        await send_response(self.gateway_url, channel, chat_id, response_content, metadata)
-
-        return {"status": "ok", "tools_used": tools_used}
+        if mcp_servers:
+            await connect_mcp_servers(mcp_servers, tools, stack)
+            logger.info(
+                f"Connected {len(mcp_servers)} HTTP MCP server(s): "
+                f"{list(mcp_servers.keys())}"
+            )

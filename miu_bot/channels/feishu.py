@@ -100,8 +100,8 @@ class FeishuChannel(BaseChannel):
     
     name = "feishu"
     
-    def __init__(self, config: FeishuConfig, bus: MessageBus):
-        super().__init__(config, bus)
+    def __init__(self, config: FeishuConfig, bus: MessageBus, bot_name: str = ""):
+        super().__init__(config, bus, bot_name=bot_name)
         self.config: FeishuConfig = config
         self._client: Any = None
         self._ws_client: Any = None

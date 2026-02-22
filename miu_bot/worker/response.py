@@ -18,6 +18,7 @@ async def send_response(
     chat_id: str,
     content: str,
     metadata: dict[str, Any] | None = None,
+    bot_name: str = "",
 ) -> None:
     """Send a response via the gateway's /internal/send endpoint."""
     if httpx is None:
@@ -29,6 +30,7 @@ async def send_response(
         "chat_id": chat_id,
         "content": content,
         "metadata": metadata or {},
+        "bot_name": bot_name,
     }
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(url, json=payload)

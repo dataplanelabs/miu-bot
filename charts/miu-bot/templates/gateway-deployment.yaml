@@ -25,7 +25,11 @@ spec:
         - name: gateway
           image: {{ include "miu-bot.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.bots }}
+          command: ["miubot", "serve", "--role", "gateway", "--bots-config", "/etc/miu-bot/bots.yaml"]
+          {{- else }}
           command: ["miubot", "serve", "--role", "gateway"]
+          {{- end }}
           ports:
             - containerPort: {{ .Values.gateway.port }}
               name: http
@@ -34,6 +38,12 @@ spec:
                 name: miubot-config
             - secretRef:
                 name: {{ .Values.existingSecret }}
+          {{- if .Values.bots }}
+          volumeMounts:
+            - name: bots-config
+              mountPath: /etc/miu-bot
+              readOnly: true
+          {{- end }}
           {{- with .Values.gateway.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}
@@ -46,3 +56,9 @@ spec:
             {{- toYaml .Values.gateway.resources | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
+      {{- if .Values.bots }}
+      volumes:
+        - name: bots-config
+          configMap:
+            name: miubot-bots
+      {{- end }}

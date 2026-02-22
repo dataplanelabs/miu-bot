@@ -1,0 +1,12 @@
+{{- if .Values.bots }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: miubot-bots
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "miu-bot.labels" . | nindent 4 }}
+data:
+  bots.yaml: |
+    {{- .Values.bots | toYaml | nindent 4 }}
+{{- end }}
