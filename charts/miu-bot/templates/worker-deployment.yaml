@@ -5,7 +5,7 @@ metadata:
   namespace: {{ .Values.namespace }}
   labels:
     {{- include "miu-bot.labels" . | nindent 4 }}
-    {{- include "miu-bot.worker.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.worker.replicas }}
@@ -16,6 +16,7 @@ spec:
   template:
     metadata:
       labels:
+        {{- include "miu-bot.labels" . | nindent 8 }}
         {{- include "miu-bot.worker.selectorLabels" . | nindent 8 }}
     spec:
       {{- with .Values.imagePullSecrets }}

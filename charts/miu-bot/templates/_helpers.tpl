@@ -28,7 +28,6 @@ Gateway selector labels
 */}}
 {{- define "miu-bot.gateway.selectorLabels" -}}
 app: miubot-gateway
-app.kubernetes.io/name: {{ include "miu-bot.name" . }}
 app.kubernetes.io/component: gateway
 {{- end }}
 
@@ -37,7 +36,6 @@ Worker selector labels
 */}}
 {{- define "miu-bot.worker.selectorLabels" -}}
 app: miubot-worker
-app.kubernetes.io/name: {{ include "miu-bot.name" . }}
 app.kubernetes.io/component: worker
 {{- end }}
 
