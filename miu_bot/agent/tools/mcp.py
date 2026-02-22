@@ -63,7 +63,9 @@ class MCPToolWrapper(Tool):
         return "\n".join(parts) or "(no output)"
 
 
-    MCP_CONNECT_TIMEOUT = 30  # seconds per server
+
+
+MCP_CONNECT_TIMEOUT = 30  # seconds per server
 
 
 async def connect_mcp_servers(
