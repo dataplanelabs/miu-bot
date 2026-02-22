@@ -222,6 +222,7 @@ class HatchetConfig(BaseModel):
     """Hatchet task orchestration configuration."""
     enabled: bool = False
     api_url: str = "http://localhost:8888"
+    grpc_host: str = ""  # gRPC endpoint (e.g. hatchet-engine.hatchet.svc:7070); empty = read from token
     token: str = ""
     namespace: str = "miubot"
     gateway_url: str = "http://miubot-gateway:18790"  # Internal service URL for worker→gateway calls

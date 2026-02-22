@@ -13,9 +13,13 @@ def create_hatchet_client(config: "HatchetConfig"):
     from hatchet_sdk import Hatchet
     from hatchet_sdk.config import ClientConfig
 
-    client_config = ClientConfig(
+    kwargs = dict(
         server_url=config.api_url,
         token=config.token,
         namespace=config.namespace,
     )
+    if config.grpc_host:
+        kwargs["host_port"] = config.grpc_host
+
+    client_config = ClientConfig(**kwargs)
     return Hatchet(config=client_config)
