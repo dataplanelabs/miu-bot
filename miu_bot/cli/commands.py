@@ -192,7 +192,7 @@ def onboard():
     console.print("  1. Add your API key to [cyan]~/.miu-bot/config.json[/cyan]")
     console.print("     Get one at: https://openrouter.ai/keys")
     console.print("  2. Chat: [cyan]miubot agent -m \"Hello!\"[/cyan]")
-    console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/dataplanelabs/miubot#-chat-apps[/dim]")
+    console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/dataplanelabs/miu-bot#-chat-apps[/dim]")
 
 
 
