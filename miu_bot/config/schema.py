@@ -224,6 +224,7 @@ class HatchetConfig(BaseModel):
     api_url: str = "http://localhost:8888"
     token: str = ""
     namespace: str = "miubot"
+    gateway_url: str = "http://miubot-gateway:18790"  # Internal service URL for worker→gateway calls
 
 
 class GatewayConfig(BaseModel):

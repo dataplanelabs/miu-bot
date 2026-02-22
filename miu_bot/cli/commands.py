@@ -494,7 +494,9 @@ def _serve_gateway(port: int, verbose: bool):
 
 def _serve_worker(verbose: bool):
     """Run in worker mode: Hatchet workflow processing (no HTTP server)."""
+    from datetime import timedelta
     from miu_bot.config.loader import load_config
+    from miu_bot.worker.client import create_hatchet_client
     from loguru import logger
 
     _setup_logging(verbose)
@@ -505,34 +507,67 @@ def _serve_worker(verbose: bool):
         console.print("[red]Worker mode requires Hatchet configuration[/red]")
         raise typer.Exit(1)
 
-    async def run():
-        backend = _create_backend(config)
-        if not backend:
-            # Postgres backend
-            from miu_bot.db.pool import create_pool, close_pool
-            from miu_bot.db.postgres import PostgresBackend
-            pool = await create_pool(config.database.url, config.database.min_pool_size, config.database.max_pool_size)
-            backend = PostgresBackend(pool)
+    hatchet = create_hatchet_client(config.hatchet)
 
+    # Lifespan: async resource setup/cleanup (DB pool, provider)
+    async def lifespan():
+        from miu_bot.db.pool import create_pool, close_pool
+        from miu_bot.db.postgres import PostgresBackend
+        from miu_bot.agent.tools.registry import ToolRegistry
+
+        pool = await create_pool(
+            config.database.url,
+            config.database.min_pool_size,
+            config.database.max_pool_size,
+        )
+        logger.info(f"Connection pool created (min={config.database.min_pool_size}, max={config.database.max_pool_size})")
         provider = _make_provider(config)
-        from miu_bot.worker.client import create_hatchet_client
-        hatchet = create_hatchet_client(config.hatchet)
-        logger.info("Worker connected to Hatchet, processing workflows...")
+        yield {
+            "backend": PostgresBackend(pool),
+            "provider": provider,
+            "tools": ToolRegistry(),
+            "model": config.agents.defaults.model,
+            "gateway_url": config.hatchet.gateway_url,
+            "max_tokens": config.agents.defaults.max_tokens,
+            "temperature": config.agents.defaults.temperature,
+            "max_iterations": config.agents.defaults.max_tool_iterations,
+        }
+        await close_pool(pool)
+        logger.info("Connection pool closed")
 
-        # In a full implementation, we'd register workflows with hatchet here
-        # and call worker.start() which blocks until shutdown
-        # For now, the structure is ready for hatchet-sdk integration
-        try:
-            while True:
-                await asyncio.sleep(1)
-        except asyncio.CancelledError:
-            pass
-        finally:
-            if hasattr(backend, '_pool'):
-                from miu_bot.db.pool import close_pool
-                await close_pool(backend._pool)
+    # Define workflows
+    from hatchet_sdk.runnables.types import ConcurrencyExpression
 
-    asyncio.run(run())
+    process_msg_wf = hatchet.workflow(
+        name="process-message",
+        on_events=["message:received"],
+        concurrency=ConcurrencyExpression(
+            expression="input.session_id",
+            max_runs=1,
+        ),
+    )
+
+    @process_msg_wf.task(execution_timeout=timedelta(minutes=5))
+    async def process_message(input, context):
+        from miu_bot.worker.workflows.process_message import ProcessMessageWorkflow
+        deps = context.lifespan
+        wf = ProcessMessageWorkflow(
+            backend=deps["backend"], provider=deps["provider"],
+            tools=deps["tools"], model=deps["model"],
+            gateway_url=deps["gateway_url"],
+            max_tokens=deps["max_tokens"], temperature=deps["temperature"],
+            max_iterations=deps["max_iterations"],
+        )
+        return await wf.process(input.model_dump())
+
+    # Start worker (blocking — creates own event loop)
+    worker = hatchet.worker(
+        "miubot-worker",
+        workflows=[process_msg_wf],
+        lifespan=lifespan,
+    )
+    logger.info("Starting Hatchet worker with workflows: [process-message]")
+    worker.start()
 
 
 @app.command()
