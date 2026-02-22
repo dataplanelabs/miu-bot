@@ -54,6 +54,8 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         claude_code_config: "ClaudeCodeConfig | None" = None,
+        backend: "MemoryBackend | None" = None,
+        resolver: "WorkspaceResolver | None" = None,
     ):
         from miu_bot.config.schema import ExecToolConfig, ClaudeCodeConfig
         from miu_bot.cron.service import CronService
@@ -87,6 +89,9 @@ class AgentLoop:
             claude_code_config=self.claude_code_config,
         )
         
+        self.backend = backend
+        self.resolver = resolver
+
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
@@ -357,21 +362,110 @@ class AgentLoop:
         self._session_queues.clear()
         logger.info("Agent loop stopping")
     
+    async def _process_multitenant(self, msg: InboundMessage) -> OutboundMessage | None:
+        """Process message in multi-tenant mode using MemoryBackend."""
+        from miu_bot.workspace.identity import parse_identity, render_system_prompt
+
+        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+
+        # Resolve workspace
+        workspace_id = msg.workspace_id
+        if not workspace_id and self.resolver:
+            workspace_id = await self.resolver.resolve(msg.channel, msg.chat_id)
+        if not workspace_id:
+            logger.warning(f"No workspace for {msg.channel}:{msg.chat_id} — dropping message")
+            return None
+
+        ws = await self.backend.get_workspace(workspace_id)
+        if not ws or ws.status != "active":
+            logger.warning(f"Workspace {workspace_id} inactive — skipping")
+            return None
+
+        # Session
+        session = await self.backend.get_or_create_session(workspace_id, msg.channel, msg.chat_id)
+
+        # Observe-only
+        if msg.observe_only:
+            sender_name = (msg.metadata or {}).get("sender_name", msg.sender_id)
+            await self.backend.save_message(
+                session.id, "user", f"[{sender_name} (userId: {msg.sender_id})]: {content}"
+            )
+            return None
+
+        # Slash commands
+        cmd = content.strip().lower()
+        if cmd == "/new":
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content="New session started.", metadata=msg.metadata or {},
+            )
+        if cmd == "/help":
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content="miu_bot commands:\n/new — Start a new conversation\n/help — Show commands",
+                metadata=msg.metadata or {},
+            )
+
+        # Load context
+        history_msgs = await self.backend.get_messages(session.id, limit=self.memory_window)
+        history = [{"role": m.role, "content": m.content} for m in history_msgs]
+        memories_list = await self.backend.get_memories(workspace_id)
+        memories_text = "\n".join(m.content for m in memories_list)
+
+        identity = parse_identity(ws.identity)
+
+        # Group message prefix
+        is_group = (msg.metadata or {}).get("is_group", False)
+        if is_group:
+            sender_name = (msg.metadata or {}).get("sender_name", msg.sender_id)
+            current_message = f"[{sender_name} (userId: {msg.sender_id})]: {content}"
+        else:
+            current_message = content
+
+        initial_messages = self.context.build_workspace_messages(
+            identity=identity, memories=memories_text, history=history,
+            current_message=current_message, channel=msg.channel, chat_id=msg.chat_id,
+            media=msg.media if msg.media else None,
+        )
+
+        final_content, tools_used = await self._run_agent_loop(
+            initial_messages, channel=msg.channel, chat_id=msg.chat_id
+        )
+
+        if final_content is None:
+            final_content = "I've completed processing but have no response to give."
+
+        # Save to backend
+        await self.backend.save_message(session.id, "user", current_message, msg.metadata)
+        await self.backend.save_message(
+            session.id, "assistant", final_content,
+            {"tools_used": tools_used} if tools_used else None,
+        )
+
+        return OutboundMessage(
+            channel=msg.channel, chat_id=msg.chat_id,
+            content=final_content, metadata=msg.metadata or {},
+        )
+
     async def _process_message(self, msg: InboundMessage, session_key: str | None = None) -> OutboundMessage | None:
         """
         Process a single inbound message.
-        
+
         Args:
             msg: The inbound message to process.
             session_key: Override session key (used by process_direct).
-        
+
         Returns:
             The response message, or None if no response needed.
         """
+        # Multi-tenant mode: delegate to backend-aware processing
+        if self.backend and not session_key:
+            return await self._process_multitenant(msg)
+
         # System messages route back via chat_id ("channel:chat_id")
         if msg.channel == "system":
             return await self._process_system_message(msg)
-        
+
         # Ensure content is a string (defensive against non-string content)
         content = msg.content if isinstance(msg.content, str) else str(msg.content)
         

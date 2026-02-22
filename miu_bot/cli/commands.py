@@ -301,12 +301,254 @@ def _make_provider(config):
 # ============================================================================
 
 
+def _setup_logging(verbose: bool):
+    """Configure logging for serve modes."""
+    from loguru import logger
+    import sys as _sys
+    logger.remove()
+    if verbose:
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+        logger.add(_sys.stderr, level="DEBUG", format="<green>{time:HH:mm:ss}</green> | <level>{level:<7}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>")
+    else:
+        logger.add(_sys.stderr, level="INFO", format="<green>{time:HH:mm:ss}</green> | <level>{level:<7}</level> | <level>{message}</level>")
+
+
+def _create_backend(config):
+    """Create the appropriate MemoryBackend from config."""
+    if config.backend.type == "postgres" and config.database.url:
+        # Postgres backend requires pool — handled in async context
+        return None  # Caller must create pool + backend in async
+    from miu_bot.db.file_backend import FileBackend
+    return FileBackend()
+
+
+def _serve_combined(port: int, verbose: bool):
+    """Run in combined mode: gateway + agent loop (no Hatchet)."""
+    from miu_bot.config.loader import load_config, get_data_dir
+    from miu_bot.bus.queue import MessageBus
+    from miu_bot.agent.loop import AgentLoop
+    from miu_bot.channels.manager import ChannelManager
+    from miu_bot.session.manager import SessionManager
+    from miu_bot.cron.service import CronService
+    from miu_bot.cron.types import CronJob
+    from miu_bot.heartbeat.service import HeartbeatService
+    from loguru import logger
+
+    _setup_logging(verbose)
+    console.print(f"{__logo__} Starting miubot serve (combined) on port {port}...")
+
+    config = load_config()
+    bus = MessageBus()
+    provider = _make_provider(config)
+    session_manager = SessionManager(config.workspace_path)
+    backend = _create_backend(config)
+
+    cron_store_path = get_data_dir() / "cron" / "jobs.json"
+    cron = CronService(cron_store_path)
+
+    agent = AgentLoop(
+        bus=bus, provider=provider, workspace=config.workspace_path,
+        model=config.agents.defaults.model,
+        temperature=config.agents.defaults.temperature,
+        max_tokens=config.agents.defaults.max_tokens,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        memory_window=config.agents.defaults.memory_window,
+        brave_api_key=config.tools.web.search.api_key or None,
+        exec_config=config.tools.exec, cron_service=cron,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
+        session_manager=session_manager, mcp_servers=config.tools.mcp_servers,
+        claude_code_config=config.tools.claude_code,
+        backend=backend,
+    )
+
+    async def on_cron_job(job: CronJob) -> str | None:
+        response = await agent.process_direct(
+            job.payload.message, session_key=f"cron:{job.id}",
+            channel=job.payload.channel or "cli", chat_id=job.payload.to or "direct",
+        )
+        if job.payload.deliver and job.payload.to:
+            from miu_bot.bus.events import OutboundMessage
+            await bus.publish_outbound(OutboundMessage(
+                channel=job.payload.channel or "cli", chat_id=job.payload.to, content=response or "",
+            ))
+        return response
+    cron.on_job = on_cron_job
+
+    async def on_heartbeat(prompt: str) -> str:
+        return await agent.process_direct(prompt, session_key="heartbeat")
+
+    heartbeat = HeartbeatService(
+        workspace=config.workspace_path, on_heartbeat=on_heartbeat,
+        interval_s=30 * 60, enabled=True,
+    )
+
+    channels = ChannelManager(config, bus)
+    if channels.enabled_channels:
+        console.print(f"[green]✓[/green] Channels: {', '.join(channels.enabled_channels)}")
+
+    async def run():
+        import uvicorn
+        from miu_bot.gateway.app import create_app
+
+        app = create_app(backend, bus)
+        uvi_config = uvicorn.Config(app, host=config.gateway.host, port=port, log_level="warning")
+        server = uvicorn.Server(uvi_config)
+
+        try:
+            await cron.start()
+            await heartbeat.start()
+            results = await asyncio.gather(
+                agent.run(), channels.start_all(), server.serve(),
+                return_exceptions=True,
+            )
+            for r in results:
+                if isinstance(r, Exception):
+                    logger.error(f"Task failed: {r}")
+        except KeyboardInterrupt:
+            console.print("\nShutting down...")
+        finally:
+            await agent.close_mcp()
+            heartbeat.stop()
+            cron.stop()
+            agent.stop()
+            await channels.stop_all()
+            server.should_exit = True
+
+    asyncio.run(run())
+
+
+def _serve_gateway(port: int, verbose: bool):
+    """Run in gateway mode: channels + Hatchet event dispatch (no AgentLoop)."""
+    from miu_bot.config.loader import load_config
+    from miu_bot.bus.queue import MessageBus
+    from miu_bot.channels.manager import ChannelManager
+    from loguru import logger
+
+    _setup_logging(verbose)
+    console.print(f"{__logo__} Starting miubot serve (gateway) on port {port}...")
+
+    config = load_config()
+    bus = MessageBus()
+    backend = _create_backend(config)
+
+    if not backend:
+        console.print("[red]Gateway mode requires a backend[/red]")
+        raise typer.Exit(1)
+
+    channels = ChannelManager(config, bus)
+
+    async def run():
+        import uvicorn
+        from miu_bot.gateway.app import create_app
+        from miu_bot.workspace.resolver import WorkspaceResolver
+
+        resolver = WorkspaceResolver(backend)
+        app = create_app(backend, bus)
+        uvi_config = uvicorn.Config(app, host=config.gateway.host, port=port, log_level="warning")
+        server = uvicorn.Server(uvi_config)
+
+        async def dispatch_to_hatchet():
+            """Consume inbound messages and dispatch to Hatchet."""
+            if not config.hatchet.enabled:
+                logger.warning("Hatchet not enabled — gateway dispatch inactive")
+                return
+            from miu_bot.worker.client import create_hatchet_client
+            hatchet = create_hatchet_client(config.hatchet)
+            while True:
+                try:
+                    msg = await asyncio.wait_for(bus.consume_inbound(), timeout=1.0)
+                    workspace_id = await resolver.resolve(msg.channel, msg.chat_id)
+                    if not workspace_id:
+                        continue
+                    session = await backend.get_or_create_session(workspace_id, msg.channel, msg.chat_id)
+                    await hatchet.event.push("message:received", {
+                        "workspace_id": workspace_id, "session_id": session.id,
+                        "channel": msg.channel, "chat_id": msg.chat_id,
+                        "sender_id": msg.sender_id, "content": msg.content,
+                        "metadata": msg.metadata,
+                    })
+                except asyncio.TimeoutError:
+                    continue
+                except asyncio.CancelledError:
+                    break
+
+        try:
+            await asyncio.gather(
+                channels.start_all(), server.serve(), dispatch_to_hatchet(),
+                return_exceptions=True,
+            )
+        finally:
+            await channels.stop_all()
+            server.should_exit = True
+
+    asyncio.run(run())
+
+
+def _serve_worker(verbose: bool):
+    """Run in worker mode: Hatchet workflow processing (no HTTP server)."""
+    from miu_bot.config.loader import load_config
+    from loguru import logger
+
+    _setup_logging(verbose)
+    console.print(f"{__logo__} Starting miubot serve (worker)...")
+
+    config = load_config()
+    if not config.hatchet.enabled and not config.hatchet.token:
+        console.print("[red]Worker mode requires Hatchet configuration[/red]")
+        raise typer.Exit(1)
+
+    async def run():
+        backend = _create_backend(config)
+        if not backend:
+            # Postgres backend
+            from miu_bot.db.pool import create_pool, close_pool
+            from miu_bot.db.postgres import PostgresBackend
+            pool = await create_pool(config.database.url, config.database.min_pool_size, config.database.max_pool_size)
+            backend = PostgresBackend(pool)
+
+        provider = _make_provider(config)
+        from miu_bot.worker.client import create_hatchet_client
+        hatchet = create_hatchet_client(config.hatchet)
+        logger.info("Worker connected to Hatchet, processing workflows...")
+
+        # In a full implementation, we'd register workflows with hatchet here
+        # and call worker.start() which blocks until shutdown
+        # For now, the structure is ready for hatchet-sdk integration
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if hasattr(backend, '_pool'):
+                from miu_bot.db.pool import close_pool
+                await close_pool(backend._pool)
+
+    asyncio.run(run())
+
+
 @app.command()
+def serve(
+    role: str = typer.Option("combined", "--role", "-r", help="Role: combined | gateway | worker"),
+    port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """Start the miubot server (combined, gateway, or worker mode)."""
+    if role == "worker":
+        _serve_worker(verbose)
+    elif role == "gateway":
+        _serve_gateway(port, verbose)
+    else:
+        _serve_combined(port, verbose)
+
+
+@app.command(hidden=True)
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
-    """Start the miubot gateway."""
+    """Start the miubot gateway (deprecated: use 'serve' instead)."""
     from miu_bot.config.loader import load_config, get_data_dir
     from miu_bot.bus.queue import MessageBus
     from miu_bot.agent.loop import AgentLoop
@@ -848,6 +1090,284 @@ def cron_run(
         console.print(f"[green]✓[/green] Job executed")
     else:
         console.print(f"[red]Failed to run job {job_id}[/red]")
+
+
+# ============================================================================
+# Workspace Commands
+# ============================================================================
+
+workspace_app = typer.Typer(help="Manage workspaces")
+app.add_typer(workspace_app, name="workspace")
+
+
+def _make_backend(config):
+    """Create the appropriate backend from config."""
+    if config.backend.type == "postgres" and config.database.url:
+        raise typer.Exit("Postgres backend requires async context. Use 'miubot serve' instead.")
+    from miu_bot.db.file_backend import FileBackend
+    return FileBackend()
+
+
+@workspace_app.command("create")
+def workspace_create(
+    name: str = typer.Argument(..., help="Workspace name"),
+    identity: Path = typer.Option(None, "--identity", "-i", help="Path to identity.md file"),
+):
+    """Create a new workspace."""
+    from miu_bot.config.loader import load_config
+    from miu_bot.workspace.service import WorkspaceService
+    from miu_bot.db.file_backend import FileBackend
+
+    config = load_config()
+    backend = FileBackend()
+
+    async def _run():
+        svc = WorkspaceService(backend)
+        ws = await svc.create(name, identity_path=identity)
+        console.print(f"[green]✓[/green] Created workspace '{ws.name}' ({ws.id})")
+
+    import asyncio
+    asyncio.run(_run())
+
+
+@workspace_app.command("list")
+def workspace_list():
+    """List all workspaces."""
+    from miu_bot.config.loader import load_config
+    from miu_bot.workspace.service import WorkspaceService
+    from miu_bot.db.file_backend import FileBackend
+
+    backend = FileBackend()
+
+    async def _run():
+        svc = WorkspaceService(backend)
+        workspaces = await svc.list()
+        if not workspaces:
+            console.print("No workspaces found.")
+            return
+        table = Table(title="Workspaces")
+        table.add_column("Name", style="cyan")
+        table.add_column("Status")
+        table.add_column("ID", style="dim")
+        table.add_column("Created")
+        for ws in workspaces:
+            status_style = "green" if ws.status == "active" else "yellow"
+            table.add_row(
+                ws.name,
+                f"[{status_style}]{ws.status}[/{status_style}]",
+                ws.id[:8],
+                ws.created_at.strftime("%Y-%m-%d %H:%M"),
+            )
+        console.print(table)
+
+    import asyncio
+    asyncio.run(_run())
+
+
+@workspace_app.command("config")
+def workspace_config(
+    name: str = typer.Argument(..., help="Workspace name"),
+    set_val: str = typer.Option(None, "--set", "-s", help="Set config key=value (dot notation)"),
+):
+    """View or update workspace config overrides."""
+    import json as _json
+    from miu_bot.workspace.service import WorkspaceService
+    from miu_bot.db.file_backend import FileBackend
+
+    backend = FileBackend()
+
+    async def _run():
+        svc = WorkspaceService(backend)
+        if set_val:
+            key, _, value = set_val.partition("=")
+            if not key or not value:
+                console.print("[red]Format: --set key=value[/red]")
+                raise typer.Exit(1)
+            # Try to parse value as JSON, fall back to string
+            try:
+                parsed = _json.loads(value)
+            except _json.JSONDecodeError:
+                parsed = value
+            ws = await svc.update_config(name, key.strip(), parsed)
+            if ws:
+                console.print(f"[green]✓[/green] Updated {key} for workspace '{name}'")
+            else:
+                console.print(f"[red]Workspace '{name}' not found[/red]")
+        else:
+            ws = await svc.get(name)
+            if not ws:
+                console.print(f"[red]Workspace '{name}' not found[/red]")
+                raise typer.Exit(1)
+            console.print(f"[cyan]{name}[/cyan] config overrides:")
+            console.print(_json.dumps(ws.config_overrides, indent=2))
+
+    import asyncio
+    asyncio.run(_run())
+
+
+@workspace_app.command("pause")
+def workspace_pause(
+    name: str = typer.Argument(..., help="Workspace name"),
+):
+    """Pause a workspace (stop processing messages)."""
+    from miu_bot.workspace.service import WorkspaceService
+    from miu_bot.db.file_backend import FileBackend
+
+    backend = FileBackend()
+
+    async def _run():
+        svc = WorkspaceService(backend)
+        ws = await svc.set_status(name, "paused")
+        if ws:
+            console.print(f"[green]✓[/green] Workspace '{name}' paused")
+        else:
+            console.print(f"[red]Workspace '{name}' not found[/red]")
+
+    import asyncio
+    asyncio.run(_run())
+
+
+@workspace_app.command("delete")
+def workspace_delete(
+    name: str = typer.Argument(..., help="Workspace name"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """Delete a workspace."""
+    from miu_bot.workspace.service import WorkspaceService
+    from miu_bot.db.file_backend import FileBackend
+
+    if not force:
+        if not typer.confirm(f"Delete workspace '{name}'?"):
+            raise typer.Abort()
+
+    backend = FileBackend()
+
+    async def _run():
+        svc = WorkspaceService(backend)
+        if await svc.delete(name):
+            console.print(f"[green]✓[/green] Deleted workspace '{name}'")
+        else:
+            console.print(f"[red]Workspace '{name}' not found[/red]")
+
+    import asyncio
+    asyncio.run(_run())
+
+
+# ============================================================================
+# Database Commands
+# ============================================================================
+
+db_app = typer.Typer(help="Database management")
+app.add_typer(db_app, name="db")
+
+
+@db_app.command("migrate")
+def db_migrate(
+    downgrade: int = typer.Option(None, "--downgrade", help="Rollback N revisions"),
+):
+    """Run database migrations."""
+    from miu_bot.config.loader import load_config
+
+    config = load_config()
+    db_url = config.database.url
+    if not db_url:
+        console.print("[red]Error: database.url not configured[/red]")
+        console.print("Set MIU_BOT_DATABASE__URL or add to config.json")
+        raise typer.Exit(1)
+
+    from alembic.config import Config as AlembicConfig
+    from alembic import command
+    from pathlib import Path as _Path
+
+    migrations_dir = str(_Path(__file__).parent.parent / "db" / "migrations")
+    alembic_cfg = AlembicConfig()
+    alembic_cfg.set_main_option("script_location", migrations_dir)
+    alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+
+    if downgrade:
+        command.downgrade(alembic_cfg, f"-{downgrade}")
+        console.print(f"[green]✓[/green] Rolled back {downgrade} revision(s)")
+    else:
+        command.upgrade(alembic_cfg, "head")
+        console.print("[green]✓[/green] Migrations applied to head")
+
+
+@db_app.command("import-legacy")
+def db_import_legacy(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without importing"),
+    data_dir: Path = typer.Option(None, "--data-dir", help="Override data directory (~/.miu-bot)"),
+):
+    """Import legacy file-based data into the database."""
+    from miu_bot.config.loader import load_config
+
+    config = load_config()
+    db_url = config.database.url
+    if not db_url:
+        console.print("[red]Error: database.url not configured[/red]")
+        raise typer.Exit(1)
+
+    base_dir = data_dir or (Path.home() / ".miu-bot")
+    if not base_dir.exists():
+        console.print(f"[red]Data directory not found: {base_dir}[/red]")
+        raise typer.Exit(1)
+
+    async def _run():
+        from miu_bot.db.pool import create_pool, close_pool
+        from miu_bot.db.postgres import PostgresBackend
+        from miu_bot.db.import_legacy import LegacyImporter
+
+        pool = await create_pool(db_url, config.database.min_pool_size, config.database.max_pool_size)
+        backend = PostgresBackend(pool)
+
+        try:
+            importer = LegacyImporter(backend, base_dir)
+            result = await importer.import_all(dry_run=dry_run)
+
+            suffix = " (dry run)" if dry_run else ""
+            table = Table(title=f"Import Summary{suffix}")
+            table.add_column("Item", style="cyan")
+            table.add_column("Count", justify="right")
+            table.add_row("Workspace", result.workspace_name or "-")
+            table.add_row("Sessions", str(result.sessions_imported))
+            table.add_row("Messages", str(result.messages_imported))
+            table.add_row("Memories", str(result.memories_imported))
+            table.add_row("Skipped", str(result.skipped))
+            table.add_row("Errors", str(len(result.errors)))
+            console.print(table)
+
+            if result.errors:
+                console.print("\n[yellow]Errors:[/yellow]")
+                for err in result.errors:
+                    console.print(f"  - {err}")
+        finally:
+            await close_pool(pool)
+
+    import asyncio
+    asyncio.run(_run())
+
+
+@db_app.command("status")
+def db_status():
+    """Show migration status."""
+    from miu_bot.config.loader import load_config
+
+    config = load_config()
+    db_url = config.database.url
+    if not db_url:
+        console.print("[red]database.url not configured[/red]")
+        raise typer.Exit(1)
+
+    from alembic.config import Config as AlembicConfig
+    from alembic import command
+    from pathlib import Path as _Path
+
+    migrations_dir = str(_Path(__file__).parent.parent / "db" / "migrations")
+    alembic_cfg = AlembicConfig()
+    alembic_cfg.set_main_option("script_location", migrations_dir)
+    alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+
+    console.print(f"Database: {db_url.split('@')[-1] if '@' in db_url else db_url}")
+    command.current(alembic_cfg, verbose=True)
 
 
 # ============================================================================

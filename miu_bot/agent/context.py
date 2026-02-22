@@ -20,10 +20,10 @@ class ContextBuilder:
     
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path | None):
         self.workspace = workspace
-        self.memory = MemoryStore(workspace)
-        self.skills = SkillsLoader(workspace)
+        self.memory = MemoryStore(workspace) if workspace else None
+        self.skills = SkillsLoader(workspace) if workspace else None
     
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """
@@ -121,6 +121,36 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         
         return "\n\n".join(parts) if parts else ""
     
+    def build_workspace_messages(
+        self,
+        identity: "IdentityDoc",
+        memories: str,
+        history: list[dict[str, Any]],
+        current_message: str,
+        channel: str | None = None,
+        chat_id: str | None = None,
+        media: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Build messages using workspace identity instead of bootstrap files."""
+        from miu_bot.workspace.identity import render_system_prompt
+        prompt = render_system_prompt(identity, memories)
+        # Add runtime info
+        from datetime import datetime
+        import time as _time
+        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        tz = _time.strftime("%Z") or "UTC"
+        system = platform.system()
+        runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
+        prompt += f"\n\n## Runtime\nTime: {now} ({tz})\n{runtime}"
+        if channel and chat_id:
+            prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
+
+        messages: list[dict[str, Any]] = [{"role": "system", "content": prompt}]
+        messages.extend(history)
+        user_content = self._build_user_content(current_message, media)
+        messages.append({"role": "user", "content": user_content})
+        return messages
+
     def build_messages(
         self,
         history: list[dict[str, Any]],

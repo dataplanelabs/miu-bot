@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: miubot
+      POSTGRES_USER: miubot
+      POSTGRES_PASSWORD: miubot
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U miubot"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  hatchet:
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-lite:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8888:8888"
+    environment:
+      DATABASE_URL: postgresql://miubot:miubot@postgres:5432/miubot
+
+  migrate:
+    build: .
+    command: miubot db migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      MIU_BOT_DATABASE__URL: postgresql://miubot:miubot@postgres:5432/miubot
+    restart: "no"
+
+  gateway:
+    build: .
+    command: miubot serve --role combined
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "18790:18790"
+    env_file: .env
+    environment:
+      MIU_BOT_DATABASE__URL: postgresql://miubot:miubot@postgres:5432/miubot
+      MIU_BOT_BACKEND__TYPE: postgres
+
+  worker:
+    build: .
+    command: miubot serve --role worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hatchet:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    deploy:
+      replicas: 2
+    env_file: .env
+    environment:
+      MIU_BOT_DATABASE__URL: postgresql://miubot:miubot@postgres:5432/miubot
+      MIU_BOT_BACKEND__TYPE: postgres
+      MIU_BOT_HATCHET__API_URL: http://hatchet:8888
+
+volumes:
+  pgdata:

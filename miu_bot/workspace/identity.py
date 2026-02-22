@@ -1,0 +1,87 @@
+"""Identity markdown parser for workspace personas."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+import yaml
+
+
+@dataclass
+class IdentityDoc:
+    name: str = ""
+    version: str = "1.0"
+    language: str = "en"
+    template: str | None = None
+    identity: str = ""
+    soul: str = ""
+    context: str = ""
+    skills: str = ""
+    constraints: str = ""
+    raw: str = ""
+
+
+_SECTION_NAMES = {"identity", "soul", "context", "skills", "constraints"}
+
+
+def parse_identity(markdown: str) -> IdentityDoc:
+    """Parse identity markdown with YAML frontmatter + ## sections."""
+    doc = IdentityDoc(raw=markdown)
+
+    # Extract YAML frontmatter
+    body = markdown
+    if markdown.startswith("---"):
+        parts = markdown.split("---", 2)
+        if len(parts) >= 3:
+            try:
+                fm = yaml.safe_load(parts[1]) or {}
+                doc.name = fm.get("name", "")
+                doc.version = fm.get("version", "1.0")
+                doc.language = fm.get("language", "en")
+                doc.template = fm.get("template")
+            except yaml.YAMLError:
+                pass
+            body = parts[2]
+
+    # Split by ## headers
+    sections: dict[str, str] = {}
+    current_section: str | None = None
+    current_lines: list[str] = []
+
+    for line in body.splitlines():
+        header_match = re.match(r"^##\s+(.+)$", line)
+        if header_match:
+            if current_section:
+                sections[current_section] = "\n".join(current_lines).strip()
+            current_section = header_match.group(1).strip().lower()
+            current_lines = []
+        else:
+            current_lines.append(line)
+
+    if current_section:
+        sections[current_section] = "\n".join(current_lines).strip()
+
+    for name in _SECTION_NAMES:
+        if name in sections:
+            setattr(doc, name, sections[name])
+
+    return doc
+
+
+def render_system_prompt(identity: IdentityDoc, memories: str = "") -> str:
+    """Render identity sections into a system prompt string."""
+    parts: list[str] = []
+    if identity.identity:
+        parts.append(f"## Identity\n{identity.identity}")
+    if identity.soul:
+        parts.append(f"## Soul\n{identity.soul}")
+    if identity.context:
+        parts.append(f"## Context\n{identity.context}")
+    if identity.skills:
+        parts.append(f"## Skills\n{identity.skills}")
+    if identity.constraints:
+        parts.append(f"## Constraints\n{identity.constraints}")
+    if memories:
+        parts.append(f"## Memories\n{memories}")
+    return "\n\n".join(parts)

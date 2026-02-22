@@ -40,10 +40,20 @@ dependencies = [
     "prompt-toolkit>=3.0.0",
     "mcp>=1.0.0",
     "json-repair>=0.30.0",
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.25.0",
+    "pyyaml>=6.0.0",
 ]
 
 [project.optional-dependencies]
 claude = ["claude-code-sdk>=0.0.20"]
+postgres = [
+    "asyncpg>=0.29.0",
+    "pgvector>=0.3.0",
+    "alembic>=1.13.0",
+    "sqlalchemy>=2.0.0",
+]
+hatchet = ["hatchet-sdk>=0.59.0"]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",

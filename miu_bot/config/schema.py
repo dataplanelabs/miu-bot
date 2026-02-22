@@ -206,6 +206,26 @@ class ProvidersConfig(BaseModel):
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
 
 
+class DatabaseConfig(BaseModel):
+    """PostgreSQL database configuration."""
+    url: str = ""  # postgresql://user:pass@host:5432/miubot
+    min_pool_size: int = 5
+    max_pool_size: int = 20
+
+
+class BackendConfig(BaseModel):
+    """Storage backend selection."""
+    type: str = "file"  # "file" or "postgres"
+
+
+class HatchetConfig(BaseModel):
+    """Hatchet task orchestration configuration."""
+    enabled: bool = False
+    api_url: str = "http://localhost:8888"
+    token: str = ""
+    namespace: str = "miubot"
+
+
 class GatewayConfig(BaseModel):
     """Gateway/server configuration."""
     host: str = "0.0.0.0"
@@ -263,6 +283,9 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    backend: BackendConfig = Field(default_factory=BackendConfig)
+    hatchet: HatchetConfig = Field(default_factory=HatchetConfig)
     
     @property
     def workspace_path(self) -> Path:
