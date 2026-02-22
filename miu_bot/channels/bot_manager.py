@@ -27,8 +27,11 @@ CHANNEL_REGISTRY: dict[str, tuple[str, str]] = {
 }
 
 
-def _build_channel_config(ch_type: str, ch_cfg: Any) -> Any:
-    """Convert generic BotChannelConfig to channel-native config object."""
+def _build_channel_config(ch_type: str, ch_cfg: Any, global_channels: Any = None) -> Any:
+    """Convert generic BotChannelConfig to channel-native config object.
+
+    Uses global channel config as base, then overlays bot-specific fields.
+    """
     from miu_bot.config import schema
 
     config_map: dict[str, type] = {
@@ -48,8 +51,14 @@ def _build_channel_config(ch_type: str, ch_cfg: Any) -> Any:
     if not config_cls:
         raise ValueError(f"Unknown channel type: {ch_type}")
 
-    # Build kwargs from BotChannelConfig fields
-    kwargs: dict[str, Any] = {"enabled": True}
+    # Start from global channel config if available
+    global_ch = getattr(global_channels, ch_type, None) if global_channels else None
+    kwargs: dict[str, Any] = global_ch.model_dump() if global_ch else {}
+
+    # Always enable (bot declared this channel)
+    kwargs["enabled"] = True
+
+    # Overlay bot-specific fields (non-empty only)
     if ch_cfg.token:
         kwargs["token"] = ch_cfg.token
     if ch_cfg.allow_from:
@@ -67,8 +76,9 @@ class BotManager:
     Channels keyed by '{bot_name}:{channel_type}'.
     """
 
-    def __init__(self, bots: dict[str, Any], bus: MessageBus):
+    def __init__(self, bots: dict[str, Any], bus: MessageBus, global_channels: Any = None):
         self.bus = bus
+        self.global_channels = global_channels
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
 
@@ -86,7 +96,7 @@ class BotManager:
                 mod = importlib.import_module(mod_path)
                 cls = getattr(mod, cls_name)
 
-                channel_config = _build_channel_config(ch_type, ch_cfg)
+                channel_config = _build_channel_config(ch_type, ch_cfg, self.global_channels)
                 instance = cls(channel_config, self.bus, bot_name=bot_name)
 
                 key = f"{bot_name}:{ch_type}"

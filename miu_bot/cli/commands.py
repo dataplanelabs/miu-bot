@@ -514,7 +514,7 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
             console.print(f"[green]✓[/green] {len(workspace_map)} workspace(s) synced")
 
         # Create bot manager with channel instances
-        bot_mgr = BotManager(bots, bus)
+        bot_mgr = BotManager(bots, bus, global_channels=config.channels)
         if bot_mgr.enabled_channels:
             console.print(f"[green]✓[/green] Channels: {', '.join(bot_mgr.enabled_channels)}")
 
