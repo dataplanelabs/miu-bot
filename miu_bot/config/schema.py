@@ -209,8 +209,8 @@ class ProvidersConfig(BaseModel):
 class DatabaseConfig(BaseModel):
     """PostgreSQL database configuration."""
     url: str = ""  # postgresql://user:pass@host:5432/miubot
-    min_pool_size: int = 5
-    max_pool_size: int = 20
+    min_pool_size: int = 2
+    max_pool_size: int = 10
 
 
 class BackendConfig(BaseModel):

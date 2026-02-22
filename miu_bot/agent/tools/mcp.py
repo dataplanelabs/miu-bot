@@ -63,44 +63,56 @@ class MCPToolWrapper(Tool):
         return "\n".join(parts) or "(no output)"
 
 
+    MCP_CONNECT_TIMEOUT = 30  # seconds per server
+
+
 async def connect_mcp_servers(
     mcp_servers: dict, registry: ToolRegistry, stack: AsyncExitStack
 ) -> None:
     """Connect to configured MCP servers and register their tools."""
+    import asyncio
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
     for name, cfg in mcp_servers.items():
         try:
-            if cfg.command:
-                params = StdioServerParameters(
-                    command=cfg.command, args=cfg.args, env=cfg.env or None
-                )
-                read, write = await stack.enter_async_context(stdio_client(params))
-            elif cfg.url:
-                from mcp.client.streamable_http import streamable_http_client
-                http_client = None
-                if cfg.headers:
-                    import httpx
-                    http_client = await stack.enter_async_context(
-                        httpx.AsyncClient(headers=cfg.headers)
+            async def _connect():
+                if cfg.command:
+                    params = StdioServerParameters(
+                        command=cfg.command, args=cfg.args, env=cfg.env or None
                     )
-                read, write, _ = await stack.enter_async_context(
-                    streamable_http_client(cfg.url, http_client=http_client)
-                )
-            else:
+                    read, write = await stack.enter_async_context(stdio_client(params))
+                elif cfg.url:
+                    from mcp.client.streamable_http import streamable_http_client
+                    http_client = None
+                    if cfg.headers:
+                        import httpx
+                        http_client = await stack.enter_async_context(
+                            httpx.AsyncClient(headers=cfg.headers)
+                        )
+                    read, write, _ = await stack.enter_async_context(
+                        streamable_http_client(cfg.url, http_client=http_client)
+                    )
+                else:
+                    return
+
+                session = await stack.enter_async_context(ClientSession(read, write))
+                await session.initialize()
+
+                tools = await session.list_tools()
+                for tool_def in tools.tools:
+                    wrapper = MCPToolWrapper(session, name, tool_def)
+                    registry.register(wrapper)
+                    logger.debug(f"MCP: registered tool '{wrapper.name}' from server '{name}'")
+
+                logger.info(f"MCP server '{name}': connected, {len(tools.tools)} tools registered")
+
+            if not cfg.command and not cfg.url:
                 logger.warning(f"MCP server '{name}': no command or url configured, skipping")
                 continue
 
-            session = await stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
-
-            tools = await session.list_tools()
-            for tool_def in tools.tools:
-                wrapper = MCPToolWrapper(session, name, tool_def)
-                registry.register(wrapper)
-                logger.debug(f"MCP: registered tool '{wrapper.name}' from server '{name}'")
-
-            logger.info(f"MCP server '{name}': connected, {len(tools.tools)} tools registered")
+            await asyncio.wait_for(_connect(), timeout=MCP_CONNECT_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.error(f"MCP server '{name}': connection timed out after {MCP_CONNECT_TIMEOUT}s")
         except Exception as e:
             logger.error(f"MCP server '{name}': failed to connect: {e}")
