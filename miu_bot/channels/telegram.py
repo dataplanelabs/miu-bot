@@ -6,6 +6,7 @@ import asyncio
 import re
 from loguru import logger
 from telegram import BotCommand, Update
+from telegram.error import Conflict
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
@@ -139,11 +140,11 @@ class TelegramChannel(BaseChannel):
         )
         
         logger.info("Starting Telegram bot (polling mode)...")
-        
+
         # Initialize and start polling
         await self._app.initialize()
         await self._app.start()
-        
+
         # Get bot info and register command menu
         bot_info = await self._app.bot.get_me()
         logger.info(f"Telegram bot @{bot_info.username} connected")
@@ -366,6 +367,11 @@ class TelegramChannel(BaseChannel):
     
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
+        if isinstance(context.error, Conflict):
+            # Transient during rolling deploys — old and new pods both poll briefly.
+            # Self-heals once the old pod terminates.
+            logger.warning("Telegram polling conflict (concurrent getUpdates) — transient during deploys")
+            return
         logger.error(f"Telegram error: {context.error}")
 
     def _get_extension(self, media_type: str, mime_type: str | None) -> str:
