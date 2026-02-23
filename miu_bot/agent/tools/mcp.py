@@ -105,12 +105,16 @@ async def connect_mcp_servers(
                     )
                 elif _cfg.url:
                     from mcp.client.streamable_http import streamable_http_client
-                    http_client = None
-                    if _cfg.headers:
-                        import httpx
-                        http_client = await server_stack.enter_async_context(
-                            httpx.AsyncClient(headers=_cfg.headers)
-                        )
+                    import httpx
+                    # Always include MCP-required Accept header; merge with
+                    # user-supplied headers (e.g. Authorization)
+                    all_headers = {
+                        "Accept": "text/event-stream, application/json",
+                        **(_cfg.headers or {}),
+                    }
+                    http_client = await server_stack.enter_async_context(
+                        httpx.AsyncClient(headers=all_headers)
+                    )
                     read, write, _ = await server_stack.enter_async_context(
                         streamable_http_client(_cfg.url, http_client=http_client)
                     )
