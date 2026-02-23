@@ -11,6 +11,33 @@ if TYPE_CHECKING:
     from miu_bot.db.backend import MemoryBackend
 
 
+def _annotate_sender(content: str, sender_id: str, sender_name: str) -> str:
+    """Prefix message with sender info so LLM can identify who is speaking."""
+    parts = []
+    if sender_id:
+        parts.append(f"userId={sender_id}")
+    if sender_name:
+        parts.append(sender_name)
+    if not parts:
+        return content
+    return f"[{' / '.join(parts)}]: {content}"
+
+
+def _build_history(messages: list, is_group: bool) -> list[dict[str, Any]]:
+    """Build LLM history, annotating user messages with sender info in groups."""
+    history = []
+    for m in messages:
+        if m.role == "user" and is_group and m.metadata:
+            meta = m.metadata if isinstance(m.metadata, dict) else {}
+            sid = meta.get("sender_id", "")
+            sname = meta.get("sender_name", "")
+            if sid or sname:
+                history.append({"role": m.role, "content": _annotate_sender(m.content, sid, sname)})
+                continue
+        history.append({"role": m.role, "content": m.content})
+    return history
+
+
 class ProcessMessageWorkflow:
     """Workflow for processing a single inbound message.
 
@@ -58,7 +85,12 @@ class ProcessMessageWorkflow:
         chat_id = workflow_input["chat_id"]
         content = workflow_input["content"]
         metadata = workflow_input.get("metadata", {})
+        sender_id = workflow_input.get("sender_id", "")
         bot_name = workflow_input.get("bot_name", "")
+
+        # Persist sender_id in metadata for history attribution
+        if sender_id:
+            metadata["sender_id"] = sender_id
 
         tracer = get_tracer()
 
@@ -117,7 +149,7 @@ class ProcessMessageWorkflow:
             memories_text = await assemble_memory_context(
                 self.backend, workspace_id, query=content
             )
-            history = [{"role": m.role, "content": m.content} for m in messages]
+            history = _build_history(messages, is_group=metadata.get("is_group", False))
 
             # Compose base prompt: templates (new) or identity (legacy)
             if templates:
@@ -172,11 +204,18 @@ class ProcessMessageWorkflow:
             if tool_hints:
                 full_prompt = f"{full_prompt}\n\n{tool_hints}"
 
+            # Annotate current message with sender for group chats
+            current_message = content
+            if metadata.get("is_group") and (sender_id or metadata.get("sender_name")):
+                current_message = _annotate_sender(
+                    content, sender_id, metadata.get("sender_name", ""),
+                )
+
             # Build LLM messages using composed prompt
             context_builder = ContextBuilder(workspace=None)
             llm_messages = context_builder.build_workspace_messages_from_prompt(
                 prompt=full_prompt, history=history,
-                current_message=content, channel=channel, chat_id=chat_id,
+                current_message=current_message, channel=channel, chat_id=chat_id,
             )
 
             # Run agent loop with heartbeat reporting
