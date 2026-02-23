@@ -150,9 +150,14 @@ class CronTaskProcessor:
                     if not channel or not chat_id:
                         logger.warning(f"Job {bot_name}:{job_name} - invalid target: {target}")
                         continue
+                    metadata = {}
+                    thread_type = resolved.get("thread_type")
+                    if thread_type:
+                        metadata["thread_type"] = thread_type
                     await send_response(
                         self.gateway_url, channel, chat_id,
-                        response_content, bot_name=bot_name,
+                        response_content, metadata=metadata,
+                        bot_name=bot_name,
                     )
                     delivered += 1
 
