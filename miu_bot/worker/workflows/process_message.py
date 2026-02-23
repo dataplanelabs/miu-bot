@@ -79,7 +79,11 @@ class ProcessMessageWorkflow:
                     workspace.identity, skills
                 )
 
-            await self._connect_mcp(workspace.config_overrides, tools, mcp_stack)
+            mcp_count = await self._connect_mcp(
+                workspace.config_overrides, tools, mcp_stack
+            )
+            if mcp_count:
+                logger.info(f"Connected {mcp_count} MCP server(s) for {bot_name}")
 
             # Load context
             messages = await self.backend.get_messages(session_id, limit=50)
@@ -125,7 +129,13 @@ class ProcessMessageWorkflow:
 
             return {"status": "ok", "tools_used": tools_used}
         finally:
-            await mcp_stack.aclose()
+            try:
+                await mcp_stack.aclose()
+            except RuntimeError as e:
+                if "cancel scope" in str(e):
+                    logger.debug(f"Suppressed MCP cleanup error: {e}")
+                else:
+                    raise
 
     def _create_provider(
         self, config_overrides: dict[str, Any]
@@ -157,11 +167,12 @@ class ProcessMessageWorkflow:
         config_overrides: dict[str, Any],
         tools: Any,
         stack: AsyncExitStack,
-    ) -> None:
+    ) -> int:
         """Connect HTTP MCP servers from workspace config_overrides.
 
         V1: HTTP/SSE MCP only — stdio MCP deferred.
         Resolves *_env references (headers_env) from worker's env vars.
+        Returns the number of successfully connected servers.
         """
         from miu_bot.config.bots import _resolve_env_fields
         from miu_bot.config.schema import MCPServerConfig
@@ -171,7 +182,7 @@ class ProcessMessageWorkflow:
             config_overrides.get("tools", {}).get("mcp_servers", {})
         )
         if not mcp_raw:
-            return
+            return 0
 
         # Resolve *_env fields and filter to HTTP-only
         mcp_servers: dict[str, MCPServerConfig] = {}
@@ -184,9 +195,7 @@ class ProcessMessageWorkflow:
             elif cfg.command:
                 logger.info(f"Skipping stdio MCP '{name}' (deferred to V2)")
 
-        if mcp_servers:
-            await connect_mcp_servers(mcp_servers, tools, stack)
-            logger.info(
-                f"Connected {len(mcp_servers)} HTTP MCP server(s): "
-                f"{list(mcp_servers.keys())}"
-            )
+        if not mcp_servers:
+            return 0
+
+        return await connect_mcp_servers(mcp_servers, tools, stack)

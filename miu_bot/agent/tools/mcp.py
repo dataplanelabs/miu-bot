@@ -65,56 +65,93 @@ class MCPToolWrapper(Tool):
 
 
 
-MCP_CONNECT_TIMEOUT = 30  # seconds per server
+MCP_CONNECT_TIMEOUT = 60  # seconds per server
 
 
 async def connect_mcp_servers(
     mcp_servers: dict, registry: ToolRegistry, stack: AsyncExitStack
-) -> None:
-    """Connect to configured MCP servers and register their tools."""
+) -> int:
+    """Connect to configured MCP servers and register their tools.
+
+    Uses per-server AsyncExitStack to isolate failures — a timeout or error
+    on one server won't leave zombie context managers on the shared stack.
+
+    Returns the number of successfully connected servers.
+    """
     import asyncio
-    from mcp import ClientSession, StdioServerParameters
-    from mcp.client.stdio import stdio_client
+    from mcp import ClientSession
+
+    connected = 0
 
     for name, cfg in mcp_servers.items():
+        if not cfg.command and not cfg.url:
+            logger.warning(f"MCP '{name}': no command or url, skipping")
+            continue
+
+        # Per-server stack isolates connection failures from the shared stack
+        server_stack = AsyncExitStack()
+        await server_stack.__aenter__()
+
         try:
-            async def _connect():
-                if cfg.command:
+            async def _connect(_cfg=cfg, _name=name):
+                if _cfg.command:
+                    from mcp import StdioServerParameters
+                    from mcp.client.stdio import stdio_client
                     params = StdioServerParameters(
-                        command=cfg.command, args=cfg.args, env=cfg.env or None
+                        command=_cfg.command, args=_cfg.args, env=_cfg.env or None
                     )
-                    read, write = await stack.enter_async_context(stdio_client(params))
-                elif cfg.url:
+                    read, write = await server_stack.enter_async_context(
+                        stdio_client(params)
+                    )
+                elif _cfg.url:
                     from mcp.client.streamable_http import streamable_http_client
                     http_client = None
-                    if cfg.headers:
+                    if _cfg.headers:
                         import httpx
-                        http_client = await stack.enter_async_context(
-                            httpx.AsyncClient(headers=cfg.headers)
+                        http_client = await server_stack.enter_async_context(
+                            httpx.AsyncClient(headers=_cfg.headers)
                         )
-                    read, write, _ = await stack.enter_async_context(
-                        streamable_http_client(cfg.url, http_client=http_client)
+                    read, write, _ = await server_stack.enter_async_context(
+                        streamable_http_client(_cfg.url, http_client=http_client)
                     )
                 else:
                     return
 
-                session = await stack.enter_async_context(ClientSession(read, write))
+                session = await server_stack.enter_async_context(
+                    ClientSession(read, write)
+                )
                 await session.initialize()
 
                 tools = await session.list_tools()
                 for tool_def in tools.tools:
-                    wrapper = MCPToolWrapper(session, name, tool_def)
+                    wrapper = MCPToolWrapper(session, _name, tool_def)
                     registry.register(wrapper)
-                    logger.debug(f"MCP: registered tool '{wrapper.name}' from server '{name}'")
 
-                logger.info(f"MCP server '{name}': connected, {len(tools.tools)} tools registered")
-
-            if not cfg.command and not cfg.url:
-                logger.warning(f"MCP server '{name}': no command or url configured, skipping")
-                continue
+                logger.info(
+                    f"MCP '{_name}': connected, {len(tools.tools)} tools registered"
+                )
 
             await asyncio.wait_for(_connect(), timeout=MCP_CONNECT_TIMEOUT)
+            # Success — transfer cleanup responsibility to the main stack
+            stack.push_async_callback(_safe_aclose, server_stack)
+            connected += 1
+
         except asyncio.TimeoutError:
-            logger.error(f"MCP server '{name}': connection timed out after {MCP_CONNECT_TIMEOUT}s")
+            logger.error(f"MCP '{name}': timed out after {MCP_CONNECT_TIMEOUT}s")
+            await _safe_aclose(server_stack)
         except Exception as e:
-            logger.error(f"MCP server '{name}': failed to connect: {e}")
+            logger.error(f"MCP '{name}': failed: {e}")
+            await _safe_aclose(server_stack)
+
+    return connected
+
+
+async def _safe_aclose(stack: AsyncExitStack) -> None:
+    """Close an AsyncExitStack, suppressing anyio cancel-scope errors."""
+    try:
+        await stack.aclose()
+    except RuntimeError as e:
+        if "cancel scope" in str(e):
+            logger.debug(f"Suppressed cancel-scope error during MCP cleanup: {e}")
+        else:
+            raise
