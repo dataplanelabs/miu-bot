@@ -456,6 +456,7 @@ def _serve_combined(port: int, verbose: bool):
         session_manager=session_manager, mcp_servers=config.tools.mcp_servers,
         claude_code_config=config.tools.claude_code,
         backend=backend,
+        media_config=config.media,
     )
 
     async def on_cron_job(job: CronJob) -> str | None:

@@ -57,8 +57,9 @@ class AgentLoop:
         claude_code_config: "ClaudeCodeConfig | None" = None,
         backend: "MemoryBackend | None" = None,
         resolver: "WorkspaceResolver | None" = None,
+        media_config: "MediaConfig | None" = None,
     ):
-        from miu_bot.config.schema import ExecToolConfig, ClaudeCodeConfig
+        from miu_bot.config.schema import ExecToolConfig, ClaudeCodeConfig, MediaConfig
         from miu_bot.cron.service import CronService
         self.bus = bus
         self.provider = provider
@@ -92,6 +93,17 @@ class AgentLoop:
         
         self.backend = backend
         self.resolver = resolver
+        self._media_config = media_config
+        self._media_client = None
+        if media_config and media_config.backend == "seaweedfs" and media_config.endpoint_url:
+            try:
+                from miu_bot.utils.media_store import get_media_client
+                self._media_client = get_media_client(
+                    media_config.endpoint_url, media_config.access_key, media_config.secret_key,
+                )
+                logger.info("SeaweedFS media client initialized")
+            except Exception as e:
+                logger.warning(f"Failed to init media client: {e}")
 
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -182,7 +194,7 @@ class AgentLoop:
     async def _run_agent_loop(
         self, initial_messages: list[dict], channel: str = "",
         chat_id: str = "", session_key: str = "",
-    ) -> tuple[str | None, list[str]]:
+    ) -> tuple[str | None, list[str], dict[str, int], list[dict]]:
         """
         Run the agent iteration loop.
 
@@ -192,12 +204,13 @@ class AgentLoop:
             chat_id: Source chat ID for tool routing context.
 
         Returns:
-            Tuple of (final_content, list_of_tools_used).
+            Tuple of (final_content, tools_used, total_usage, all_messages).
         """
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        total_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -218,9 +231,11 @@ class AgentLoop:
                 final_content = "Sorry, the response took too long. Please try again."
                 break
 
-            # Log LLM response metadata
+            # Log LLM response metadata and accumulate usage
             if response.usage:
                 logger.debug(f"LLM usage: {response.usage}")
+                for k in total_usage:
+                    total_usage[k] += response.usage.get(k, 0)
             logger.debug(f"LLM finish_reason: {response.finish_reason}")
             if response.reasoning_content:
                 preview = response.reasoning_content[:500]
@@ -269,7 +284,7 @@ class AgentLoop:
                 final_content = response.content
                 break
 
-        return final_content, tools_used
+        return final_content, tools_used, total_usage, messages
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages to per-session workers."""
@@ -450,7 +465,7 @@ class AgentLoop:
         if tool_hints and initial_messages and initial_messages[0]["role"] == "system":
             initial_messages[0]["content"] += f"\n\n{tool_hints}"
 
-        final_content, tools_used = await self._run_agent_loop(
+        final_content, tools_used, total_usage, all_messages = await self._run_agent_loop(
             initial_messages, channel=msg.channel, chat_id=msg.chat_id,
             session_key=f"{workspace_id}:{msg.channel}:{msg.chat_id}",
         )
@@ -458,11 +473,53 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        # Save to backend
-        await self.backend.save_message(session.id, "user", current_message, msg.metadata)
+        # Upload media to SeaweedFS and build refs
+        media_refs: list[dict] = []
+        if msg.media and self._media_client and self._media_config:
+            import mimetypes
+            from miu_bot.utils.media_store import upload_media
+            for path in msg.media:
+                mime, _ = mimetypes.guess_type(path)
+                if not mime:
+                    continue
+                try:
+                    ref = await asyncio.to_thread(
+                        upload_media,
+                        self._media_client, self._media_config.bucket,
+                        workspace_id, session.id, path, mime,
+                        ttl_days=self._media_config.ttl_days,
+                    )
+                    media_refs.append(ref)
+                except Exception as e:
+                    logger.warning(f"Media upload failed for {path}: {e}")
+
+        # Save user message
+        user_meta = dict(msg.metadata) if msg.metadata else {}
+        if media_refs:
+            user_meta["media"] = media_refs
         await self.backend.save_message(
-            session.id, "assistant", final_content,
-            {"tools_used": tools_used} if tools_used else None,
+            session.id, "user", current_message, user_meta or None,
+        )
+
+        # Save intermediate assistant+tool messages (E6a)
+        initial_count = len(initial_messages)
+        for m in all_messages[initial_count:]:
+            role = m.get("role")
+            if role not in ("assistant", "tool"):
+                continue  # skip synthetic "Reflect..." user prompts
+            content = m.get("content") or ""
+            meta: dict = {}
+            for field in ("tool_calls", "tool_call_id", "name", "reasoning_content"):
+                if field in m:
+                    meta[field] = m[field]
+            await self.backend.save_message(session.id, role, content, meta or None)
+
+        # Save final assistant message with usage (E6b)
+        final_meta: dict = {"tools_used": tools_used} if tools_used else {}
+        if any(total_usage.values()):
+            final_meta["usage"] = total_usage
+        await self.backend.save_message(
+            session.id, "assistant", final_content, final_meta or None,
         )
 
         return OutboundMessage(
@@ -547,7 +604,7 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
         )
-        final_content, tools_used = await self._run_agent_loop(
+        final_content, tools_used, _, _ = await self._run_agent_loop(
             initial_messages, channel=msg.channel, chat_id=msg.chat_id,
             session_key=key,
         )
@@ -597,7 +654,7 @@ class AgentLoop:
             channel=origin_channel,
             chat_id=origin_chat_id,
         )
-        final_content, _ = await self._run_agent_loop(
+        final_content, _, _, _ = await self._run_agent_loop(
             initial_messages, channel=origin_channel, chat_id=origin_chat_id,
             session_key=session_key,
         )

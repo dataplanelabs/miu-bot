@@ -216,6 +216,16 @@ class DatabaseConfig(BaseModel):
     max_pool_size: int = 10
 
 
+class MediaConfig(BaseModel):
+    """Media storage configuration (SeaweedFS via S3 API)."""
+    backend: str = "local"  # "local" | "seaweedfs"
+    endpoint_url: str = ""
+    bucket: str = "miu-bot-media"
+    access_key: str = ""
+    secret_key: str = ""
+    ttl_days: int = 90
+
+
 class BackendConfig(BaseModel):
     """Storage backend selection."""
     type: str = "file"  # "file" or "postgres"
@@ -314,6 +324,7 @@ class Config(BaseSettings):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     backend: BackendConfig = Field(default_factory=BackendConfig)
+    media: MediaConfig = Field(default_factory=MediaConfig)
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
     dispatch: DispatchConfig = Field(default_factory=DispatchConfig)
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)

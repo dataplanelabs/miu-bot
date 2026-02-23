@@ -48,6 +48,7 @@ dependencies = [
 
 [project.optional-dependencies]
 claude = ["claude-code-sdk>=0.0.20"]
+media = ["boto3>=1.28.0"]
 postgres = [
     "asyncpg>=0.29.0",
     "pgvector>=0.3.0",

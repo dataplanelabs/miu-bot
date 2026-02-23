@@ -255,10 +255,16 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
+        """Build user message content with optional base64-encoded images.
+
+        Currently reads from local file paths. SeaweedFS keys are stored in
+        message metadata for persistence; local files still exist during
+        processing so no remote fetch is needed yet.
+        TODO: fetch from SeaweedFS when local file is missing (distributed worker mode).
+        """
         if not media:
             return text
-        
+
         images = []
         for path in media:
             p = Path(path)
