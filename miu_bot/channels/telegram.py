@@ -194,17 +194,24 @@ class TelegramChannel(BaseChannel):
         # Get bot info and register command menu
         bot_info = await self._app.bot.get_me()
         logger.info(f"Telegram bot @{bot_info.username} connected")
-        
+
         try:
             await self._app.bot.set_my_commands(self.BOT_COMMANDS)
             logger.debug("Telegram bot commands registered")
         except Exception as e:
             logger.warning(f"Failed to register bot commands: {e}")
-        
-        # Start polling (this runs until stopped)
+
+        # Clear any stale webhook before polling — prevents conflicts when switching
+        # from webhook mode or after unclean shutdowns (PTB best practice)
+        await self._app.bot.delete_webhook(drop_pending_updates=True)
+
+        # Start polling with error_callback to handle polling-loop errors gracefully.
+        # Without this, PTB logs Conflict errors as full tracebacks via its internal
+        # network_retry_loop. The error_callback replaces that default logging.
         await self._app.updater.start_polling(
             allowed_updates=["message"],
-            drop_pending_updates=True  # Ignore old messages on startup
+            drop_pending_updates=True,
+            error_callback=self._on_polling_error,
         )
         
         # Keep running until stopped
@@ -295,11 +302,11 @@ class TelegramChannel(BaseChannel):
         user = update.effective_user
         chat_id = message.chat_id
         
-        # Use stable numeric ID, but keep username for allowlist compatibility
+        # Stable numeric ID + username for richer identity context
         sender_id = str(user.id)
         if user.username:
             sender_id = f"{sender_id}|{user.username}"
-        
+
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
         
@@ -412,14 +419,23 @@ class TelegramChannel(BaseChannel):
         except Exception as e:
             logger.debug(f"Typing indicator stopped for {chat_id}: {e}")
     
+    def _on_polling_error(self, error: Exception) -> None:
+        """Handle errors from the polling loop (network_retry_loop).
+
+        Replaces PTB's default full-traceback logging with concise messages.
+        PTB retries automatically after this callback returns.
+        """
+        if isinstance(error, Conflict):
+            logger.warning(
+                "Telegram polling conflict (concurrent getUpdates) — "
+                "transient during deploys, will retry automatically"
+            )
+        else:
+            logger.error(f"Telegram polling error: {error}")
+
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Log polling / handler errors instead of silently swallowing them."""
-        if isinstance(context.error, Conflict):
-            # Transient during rolling deploys — old and new pods both poll briefly.
-            # Self-heals once the old pod terminates.
-            logger.warning("Telegram polling conflict (concurrent getUpdates) — transient during deploys")
-            return
-        logger.error(f"Telegram error: {context.error}")
+        """Handle errors from update handlers (message/command processing)."""
+        logger.error(f"Telegram handler error: {context.error}")
 
     def _get_extension(self, media_type: str, mime_type: str | None) -> str:
         """Get file extension based on media type."""
