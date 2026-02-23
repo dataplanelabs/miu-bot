@@ -608,11 +608,7 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
                         workspace_id, msg.channel, msg.chat_id
                     )
 
-                    task_queue = (
-                        f"{msg.bot_name}-tasks"
-                        if msg.bot_name
-                        else config.temporal.task_queue
-                    )
+                    task_queue = config.temporal.task_queue
                     await dispatch_message(
                         client=temporal_client,
                         workspace_id=workspace_id,
