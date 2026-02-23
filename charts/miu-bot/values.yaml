@@ -19,7 +19,9 @@ config:
   MIU_BOT_BACKEND__TYPE: "postgres"
   MIU_BOT_GATEWAY__HOST: "0.0.0.0"
   MIU_BOT_GATEWAY__PORT: "18790"
-  MIU_BOT_AGENTS__DEFAULTS__MODEL: "anthropic/claude-opus-4-5"
+  MIU_BOT_AGENTS__DEFAULTS__MODEL: "anthropic/claude-opus-4-6"
+  MIU_BOT_TEMPORAL__SERVER_URL: "temporal-frontend.temporal.svc:7233"
+  MIU_BOT_TEMPORAL__NAMESPACE: "miubot"
 
 # -- Gateway component
 gateway:
