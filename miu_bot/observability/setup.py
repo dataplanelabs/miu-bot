@@ -61,30 +61,31 @@ def init_otel(config: "OTelConfig") -> None:
         tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
         trace.set_tracer_provider(tracer_provider)
 
-        # Metrics
-        if config.protocol == "grpc":
-            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
-                OTLPMetricExporter,
-            )
-        else:
-            from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
-                OTLPMetricExporter,
-            )
+        # Metrics (optional — requires collector with metrics pipeline)
+        if config.metrics_enabled:
+            if config.protocol == "grpc":
+                from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+                    OTLPMetricExporter,
+                )
+            else:
+                from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
+                    OTLPMetricExporter,
+                )
 
-        metric_exporter = OTLPMetricExporter(
-            endpoint=(
-                config.endpoint
-                if config.protocol == "grpc"
-                else f"{config.endpoint}/v1/metrics"
-            ),
-            insecure=config.protocol == "grpc",
-        )
-        reader = PeriodicExportingMetricReader(
-            metric_exporter,
-            export_interval_millis=config.export_interval_ms,
-        )
-        meter_provider = MeterProvider(resource=resource, metric_readers=[reader])
-        metrics.set_meter_provider(meter_provider)
+            metric_exporter = OTLPMetricExporter(
+                endpoint=(
+                    config.endpoint
+                    if config.protocol == "grpc"
+                    else f"{config.endpoint}/v1/metrics"
+                ),
+                insecure=config.protocol == "grpc",
+            )
+            reader = PeriodicExportingMetricReader(
+                metric_exporter,
+                export_interval_millis=config.export_interval_ms,
+            )
+            meter_provider = MeterProvider(resource=resource, metric_readers=[reader])
+            metrics.set_meter_provider(meter_provider)
 
         # Inject trace context into loguru records
         logger.configure(patcher=_inject_trace_context)

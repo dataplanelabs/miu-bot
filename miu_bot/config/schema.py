@@ -242,6 +242,7 @@ class OTelConfig(BaseModel):
     service_version: str = ""  # auto-detect from package
     environment: str = "production"
     sample_rate: float = 1.0  # 0.0 to 1.0
+    metrics_enabled: bool = False  # OTLP metrics (requires collector support)
     export_interval_ms: int = 5000
 
 
