@@ -25,6 +25,18 @@ _ZALO_FORMATTING_RULES = (
     "\n- IMPORTANT: URLs must be DIRECT image links. Never guess or fabricate URLs."
 )
 
+_TELEGRAM_FORMATTING_RULES = (
+    "\n\nFORMATTING RULES (MANDATORY — Telegram):"
+    "\n- Telegram supports: **bold**, _italic_, `inline code`, ```code blocks```, [links](url), ~~strikethrough~~."
+    "\n- Telegram does NOT support markdown tables. NEVER use | column | syntax or table formatting."
+    "\n- For tabular/comparison data, use one of these formats instead:"
+    "\n  • Labeled list: **Label:** value (one item per line)"
+    "\n  • Grouped sections: bold header + indented bullet items"
+    "\n  • Code block: ```monospace aligned text``` for small aligned data"
+    "\n- Keep messages well-structured with bold headers and bullet lists."
+    "\n- No character limit, but prefer concise answers."
+)
+
 
 def _append_session_info(prompt: str, channel: str | None, chat_id: str | None) -> str:
     """Append channel/session info to prompt (shared by all build methods)."""
@@ -33,6 +45,8 @@ def _append_session_info(prompt: str, channel: str | None, chat_id: str | None) 
     session_info = f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
     if channel == "zalo":
         session_info += _ZALO_FORMATTING_RULES
+    elif channel == "telegram":
+        session_info += _TELEGRAM_FORMATTING_RULES
     return prompt + session_info
 
 

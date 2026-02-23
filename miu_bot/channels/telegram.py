@@ -16,13 +16,59 @@ from miu_bot.channels.base import BaseChannel
 from miu_bot.config.schema import TelegramConfig
 
 
+def _convert_markdown_tables(text: str) -> str:
+    """Convert markdown tables to labeled lists before HTML conversion.
+
+    Handles tables like:
+        | Header1 | Header2 |
+        |---------|---------|
+        | val1    | val2    |
+
+    Converts to:
+        **Header1:** val1
+        **Header2:** val2
+    """
+    lines = text.split("\n")
+    result: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        # Detect table header row: starts and ends with |
+        if line.startswith("|") and line.endswith("|"):
+            headers = [h.strip() for h in line.strip("|").split("|")]
+            # Check for separator row (|---|---|)
+            if i + 1 < len(lines) and re.match(
+                r"^\|[\s:]*-+[\s:]*(\|[\s:]*-+[\s:]*)+\|$",
+                lines[i + 1].strip(),
+            ):
+                i += 2  # skip header + separator
+                # Process data rows
+                while i < len(lines) and lines[i].strip().startswith("|"):
+                    row = lines[i].strip()
+                    if not row.endswith("|"):
+                        break
+                    cells = [c.strip() for c in row.strip("|").split("|")]
+                    for h, c in zip(headers, cells):
+                        if h and c:
+                            result.append(f"**{h}:** {c}")
+                    result.append("")  # blank line between rows
+                    i += 1
+                continue
+        result.append(lines[i])
+        i += 1
+    return "\n".join(result)
+
+
 def _markdown_to_telegram_html(text: str) -> str:
     """
     Convert markdown to Telegram-safe HTML.
     """
     if not text:
         return ""
-    
+
+    # 0. Convert markdown tables to labeled lists (Telegram doesn't support tables)
+    text = _convert_markdown_tables(text)
+
     # 1. Extract and protect code blocks (preserve content from other processing)
     code_blocks: list[str] = []
     def save_code_block(m: re.Match) -> str:
