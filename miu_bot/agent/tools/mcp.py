@@ -66,6 +66,70 @@ class MCPToolWrapper(Tool):
 
 
 MCP_CONNECT_TIMEOUT = 60  # seconds per server
+MCP_SSE_RETRIES = 2  # extra attempts for flaky SSE connections
+
+
+def _format_exception_details(e: Exception) -> str:
+    """Extract useful details from exceptions, especially ExceptionGroups."""
+    if isinstance(e, BaseExceptionGroup):
+        sub_msgs = [f"  - {type(sub).__name__}: {sub}" for sub in e.exceptions]
+        return f"{e}\n" + "\n".join(sub_msgs)
+    return str(e)
+
+
+async def _try_connect_server(
+    name: str, cfg, server_stack: AsyncExitStack, registry: ToolRegistry
+) -> None:
+    """Connect a single MCP server and register its tools."""
+    from mcp import ClientSession
+
+    if cfg.command:
+        from mcp import StdioServerParameters
+        from mcp.client.stdio import stdio_client
+        params = StdioServerParameters(
+            command=cfg.command, args=cfg.args, env=cfg.env or None
+        )
+        read, write = await server_stack.enter_async_context(
+            stdio_client(params)
+        )
+    elif cfg.url:
+        url = cfg.url
+        # SSE transport: sse:// scheme for supergateway-wrapped servers
+        if url.startswith("sse://"):
+            from mcp.client.sse import sse_client
+            http_url = url.replace("sse://", "http://", 1)
+            all_headers = {**(cfg.headers or {})}
+            read, write = await server_stack.enter_async_context(
+                sse_client(http_url, headers=all_headers)
+            )
+        else:
+            # Streamable HTTP (default for native MCP servers)
+            from mcp.client.streamable_http import streamable_http_client
+            import httpx
+            all_headers = {
+                "Accept": "text/event-stream, application/json",
+                **(cfg.headers or {}),
+            }
+            http_client = await server_stack.enter_async_context(
+                httpx.AsyncClient(headers=all_headers)
+            )
+            read, write, _ = await server_stack.enter_async_context(
+                streamable_http_client(url, http_client=http_client)
+            )
+    else:
+        return
+
+    session = await server_stack.enter_async_context(
+        ClientSession(read, write)
+    )
+    await session.initialize()
+
+    tools = await session.list_tools()
+    for tool_def in tools.tools:
+        wrapper = MCPToolWrapper(session, name, tool_def)
+        registry.register(wrapper)
+
+    logger.info(f"MCP '{name}': connected, {len(tools.tools)} tools registered")
 
 
 async def connect_mcp_servers(
@@ -75,11 +139,10 @@ async def connect_mcp_servers(
 
     Uses per-server AsyncExitStack to isolate failures — a timeout or error
     on one server won't leave zombie context managers on the shared stack.
+    SSE connections get retries since supergateway can be flaky.
 
     Returns the number of successfully connected servers.
     """
-    from mcp import ClientSession
-
     connected = 0
 
     for name, cfg in mcp_servers.items():
@@ -87,76 +150,47 @@ async def connect_mcp_servers(
             logger.warning(f"MCP '{name}': no command or url, skipping")
             continue
 
-        # Per-server stack isolates connection failures from the shared stack
-        server_stack = AsyncExitStack()
-        await server_stack.__aenter__()
+        is_sse = cfg.url and cfg.url.startswith("sse://")
+        max_attempts = (1 + MCP_SSE_RETRIES) if is_sse else 1
+        last_error = None
 
-        try:
-            async def _connect(_cfg=cfg, _name=name):
-                if _cfg.command:
-                    from mcp import StdioServerParameters
-                    from mcp.client.stdio import stdio_client
-                    params = StdioServerParameters(
-                        command=_cfg.command, args=_cfg.args, env=_cfg.env or None
-                    )
-                    read, write = await server_stack.enter_async_context(
-                        stdio_client(params)
-                    )
-                elif _cfg.url:
-                    url = _cfg.url
-                    # SSE transport: sse:// scheme for supergateway-wrapped servers
-                    if url.startswith("sse://"):
-                        from mcp.client.sse import sse_client
-                        http_url = url.replace("sse://", "http://", 1)
-                        all_headers = {**(_cfg.headers or {})}
-                        read, write = await server_stack.enter_async_context(
-                            sse_client(http_url, headers=all_headers)
-                        )
-                    else:
-                        # Streamable HTTP (default for native MCP servers)
-                        from mcp.client.streamable_http import streamable_http_client
-                        import httpx
-                        all_headers = {
-                            "Accept": "text/event-stream, application/json",
-                            **(_cfg.headers or {}),
-                        }
-                        http_client = await server_stack.enter_async_context(
-                            httpx.AsyncClient(headers=all_headers)
-                        )
-                        read, write, _ = await server_stack.enter_async_context(
-                            streamable_http_client(url, http_client=http_client)
-                        )
-                else:
-                    return
+        for attempt in range(1, max_attempts + 1):
+            # Per-server stack isolates connection failures from the shared stack
+            server_stack = AsyncExitStack()
+            await server_stack.__aenter__()
 
-                session = await server_stack.enter_async_context(
-                    ClientSession(read, write)
+            try:
+                await asyncio.wait_for(
+                    _try_connect_server(name, cfg, server_stack, registry),
+                    timeout=MCP_CONNECT_TIMEOUT,
                 )
-                await session.initialize()
+                # Success — transfer cleanup responsibility to the main stack
+                stack.push_async_callback(_safe_aclose, server_stack)
+                connected += 1
+                last_error = None
+                break
 
-                tools = await session.list_tools()
-                for tool_def in tools.tools:
-                    wrapper = MCPToolWrapper(session, _name, tool_def)
-                    registry.register(wrapper)
+            except asyncio.TimeoutError:
+                logger.error(f"MCP '{name}': timed out after {MCP_CONNECT_TIMEOUT}s (attempt {attempt}/{max_attempts})")
+                await _safe_aclose(server_stack)
+                last_error = "timeout"
+            except asyncio.CancelledError:
+                logger.error(f"MCP '{name}': cancelled during connect")
+                await _safe_aclose(server_stack)
+                raise  # Don't retry on cancellation
+            except Exception as e:
+                details = _format_exception_details(e)
+                logger.error(f"MCP '{name}': failed (attempt {attempt}/{max_attempts}): {details}")
+                await _safe_aclose(server_stack)
+                last_error = details
 
-                logger.info(
-                    f"MCP '{_name}': connected, {len(tools.tools)} tools registered"
-                )
+            # Brief pause before retry
+            if attempt < max_attempts:
+                logger.info(f"MCP '{name}': retrying in 2s...")
+                await asyncio.sleep(2)
 
-            await asyncio.wait_for(_connect(), timeout=MCP_CONNECT_TIMEOUT)
-            # Success — transfer cleanup responsibility to the main stack
-            stack.push_async_callback(_safe_aclose, server_stack)
-            connected += 1
-
-        except asyncio.TimeoutError:
-            logger.error(f"MCP '{name}': timed out after {MCP_CONNECT_TIMEOUT}s")
-            await _safe_aclose(server_stack)
-        except asyncio.CancelledError:
-            logger.error(f"MCP '{name}': cancelled during connect")
-            await _safe_aclose(server_stack)
-        except Exception as e:
-            logger.error(f"MCP '{name}': failed: {e}")
-            await _safe_aclose(server_stack)
+        if last_error:
+            logger.warning(f"MCP '{name}': gave up after {max_attempts} attempts")
 
     return connected
 
