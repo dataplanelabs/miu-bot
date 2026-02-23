@@ -143,6 +143,9 @@ async def connect_mcp_servers(
         except asyncio.TimeoutError:
             logger.error(f"MCP '{name}': timed out after {MCP_CONNECT_TIMEOUT}s")
             await _safe_aclose(server_stack)
+        except asyncio.CancelledError:
+            logger.error(f"MCP '{name}': cancelled during connect")
+            await _safe_aclose(server_stack)
         except Exception as e:
             logger.error(f"MCP '{name}': failed: {e}")
             await _safe_aclose(server_stack)
