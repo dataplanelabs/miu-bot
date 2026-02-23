@@ -48,6 +48,7 @@ class JobTarget(BaseModel):
     channel: str
     chat_id: str = ""
     chat_id_env: str = ""
+    thread_type: int | None = None  # Zalo: 1=user, 2=group
 
 
 class JobConfig(BaseModel):
