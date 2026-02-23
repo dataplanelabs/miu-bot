@@ -9,6 +9,8 @@ from typing import Any, TYPE_CHECKING
 
 from loguru import logger
 
+from miu_bot.observability.spans import get_tracer
+
 if TYPE_CHECKING:
     from miu_bot.providers.base import LLMProvider
     from miu_bot.agent.tools.registry import ToolRegistry
@@ -33,10 +35,13 @@ async def run_agent_loop(
     final_content = None
     tools_used: list[str] = []
     trace: list[dict[str, Any]] = []
+    tracer = get_tracer()
 
     while iteration < max_iterations:
         iteration += 1
         t_llm = time.monotonic()
+
+        llm_span = tracer.start_span(f"llm.chat #{iteration}", attributes={"miubot.model": model}) if tracer else None
         try:
             response = await asyncio.wait_for(
                 provider.chat(
@@ -50,8 +55,14 @@ async def run_agent_loop(
             )
         except asyncio.TimeoutError:
             logger.warning("LLM call timed out after 180s")
+            if llm_span:
+                llm_span.set_attribute("error", True)
+                llm_span.end()
             trace.append({"event": "llm_timeout", "iteration": iteration})
             return "Sorry, the response took too long. Please try again.", tools_used, trace
+        finally:
+            if llm_span:
+                llm_span.end()
 
         llm_elapsed = round(time.monotonic() - t_llm, 2)
 
@@ -94,10 +105,16 @@ async def run_agent_loop(
                 tools_used.append(tool_call.name)
                 logger.info(f"Tool call: {tool_call.name}")
                 t0 = time.monotonic()
+                tool_span = tracer.start_span(
+                    f"tool.{tool_call.name}",
+                    attributes={"miubot.tool": tool_call.name},
+                ) if tracer else None
                 try:
                     result = await tools.execute(tool_call.name, tool_call.arguments)
                     elapsed = round(time.monotonic() - t0, 2)
                     _record_tool_latency(tool_call.name, elapsed)
+                    if tool_span:
+                        tool_span.set_attribute("miubot.tool.latency_s", elapsed)
                     tool_event = {
                         "event": "tool_call",
                         "iteration": iteration,
@@ -111,6 +128,9 @@ async def run_agent_loop(
                     elapsed = round(time.monotonic() - t0, 2)
                     logger.warning(f"Tool '{tool_call.name}' failed: {e}")
                     result = f"Error: tool execution failed: {e}"
+                    if tool_span:
+                        tool_span.set_attribute("error", True)
+                        tool_span.set_attribute("miubot.tool.error", str(e)[:200])
                     tool_event = {
                         "event": "tool_call",
                         "iteration": iteration,
@@ -119,6 +139,9 @@ async def run_agent_loop(
                         "status": "error",
                         "error": str(e)[:200],
                     }
+                finally:
+                    if tool_span:
+                        tool_span.end()
                 trace.append(tool_event)
                 if on_heartbeat:
                     on_heartbeat({"phase": "tool_done", "tool": tool_call.name, "latency_s": elapsed})

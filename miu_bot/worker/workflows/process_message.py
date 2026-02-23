@@ -44,6 +44,7 @@ class ProcessMessageWorkflow:
 
         from temporalio import activity
 
+        from miu_bot.observability.spans import get_tracer
         from miu_bot.workspace.identity import parse_identity
         from miu_bot.agent.context import ContextBuilder
         from miu_bot.agent.processor import run_agent_loop
@@ -59,10 +60,23 @@ class ProcessMessageWorkflow:
         metadata = workflow_input.get("metadata", {})
         bot_name = workflow_input.get("bot_name", "")
 
+        tracer = get_tracer()
+
         # Load workspace
         workspace = await self.backend.get_workspace(workspace_id)
         if not workspace or workspace.status != "active":
             return {"status": "skipped", "reason": "workspace_inactive"}
+
+        span_ctx = tracer.start_as_current_span(
+            "process_message",
+            attributes={
+                "miubot.bot": bot_name,
+                "miubot.channel": channel,
+                "miubot.workspace_id": workspace_id,
+            },
+        ) if tracer else None
+
+        span = span_ctx.__enter__() if span_ctx else None
 
         # Ensure session exists (keyed by workspace + channel + chat_id)
         session = await self.backend.get_or_create_session(
@@ -72,6 +86,8 @@ class ProcessMessageWorkflow:
 
         # Create per-workspace provider
         provider, model = self._create_provider(workspace.config_overrides)
+        if span:
+            span.set_attribute("miubot.model", model)
 
         # Create per-workspace tools (MCP)
         tools = ToolRegistry()
@@ -95,6 +111,8 @@ class ProcessMessageWorkflow:
             )
             if mcp_count:
                 logger.info(f"Connected {mcp_count} MCP server(s) for {bot_name}")
+                if span:
+                    span.set_attribute("miubot.mcp_servers", mcp_count)
 
             # Load context
             messages = await self.backend.get_messages(session_id, limit=50)
@@ -134,6 +152,10 @@ class ProcessMessageWorkflow:
                     "I've completed processing but have no response to give."
                 )
 
+            if span:
+                span.set_attribute("miubot.tools_used", ",".join(tools_used))
+                span.set_attribute("miubot.response_len", len(response_content))
+
             # Save messages
             await self.backend.save_message(
                 session_id, "user", content, metadata
@@ -150,6 +172,8 @@ class ProcessMessageWorkflow:
             )
 
             total_s = round(_time.monotonic() - t_start, 2)
+            if span:
+                span.set_attribute("miubot.total_s", total_s)
             return {
                 "status": "ok",
                 "bot": bot_name,
@@ -160,6 +184,8 @@ class ProcessMessageWorkflow:
                 "trace": trace,
             }
         finally:
+            if span_ctx:
+                span_ctx.__exit__(None, None, None)
             try:
                 await mcp_stack.aclose()
             except RuntimeError as e:
