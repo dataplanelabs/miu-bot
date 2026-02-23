@@ -556,56 +556,69 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
         )
         server = uvicorn.Server(uvi_config)
 
-        # Create Temporal consolidation schedules for all workspaces
+        # Create Temporal schedules
         if workspace_map:
             try:
                 from miu_bot.dispatch.client import create_temporal_client as _tc
-                from miu_bot.dispatch.schedules import (
-                    create_daily_consolidation_schedule,
-                    create_weekly_consolidation_schedule,
-                    create_monthly_consolidation_schedule,
-                    ensure_job_schedules,
-                )
 
                 _sched_client = await _tc(
                     config.temporal.server_url, config.temporal.namespace
                 )
-                for _bot_name, _ws_id in workspace_map.items():
-                    await create_daily_consolidation_schedule(
-                        _sched_client, _ws_id,
-                        task_queue=config.temporal.task_queue,
-                    )
-                    await create_weekly_consolidation_schedule(
-                        _sched_client, _ws_id,
-                        task_queue=config.temporal.task_queue,
-                    )
-                    await create_monthly_consolidation_schedule(
-                        _sched_client, _ws_id,
-                        task_queue=config.temporal.task_queue,
-                    )
-                console.print(
-                    f"[green]✓[/green] Consolidation schedules (daily/weekly/monthly): "
-                    f"{len(workspace_map)} workspace(s)"
-                )
-
-                # Create Temporal job schedules for bots with jobs
-                job_count = 0
-                for _bot_name, _ws_id in workspace_map.items():
-                    bot_cfg = bots.get(_bot_name)
-                    if bot_cfg and bot_cfg.jobs:
-                        _jc = await ensure_job_schedules(
-                            _sched_client, _bot_name, _ws_id,
-                            bot_cfg.jobs,
-                            task_queue=config.temporal.task_queue,
-                        )
-                        job_count += _jc
-                if job_count:
-                    console.print(
-                        f"[green]✓[/green] Job schedules: {job_count} job(s)"
-                    )
             except Exception as _e:
                 from loguru import logger as _logger
-                _logger.warning(f"Could not create consolidation schedules: {_e}")
+                _logger.warning(f"Could not connect Temporal for schedules: {_e}")
+                _sched_client = None
+
+            # Consolidation schedules
+            if _sched_client:
+                try:
+                    from miu_bot.dispatch.schedules import (
+                        create_daily_consolidation_schedule,
+                        create_weekly_consolidation_schedule,
+                        create_monthly_consolidation_schedule,
+                    )
+                    for _bot_name, _ws_id in workspace_map.items():
+                        await create_daily_consolidation_schedule(
+                            _sched_client, _ws_id,
+                            task_queue=config.temporal.task_queue,
+                        )
+                        await create_weekly_consolidation_schedule(
+                            _sched_client, _ws_id,
+                            task_queue=config.temporal.task_queue,
+                        )
+                        await create_monthly_consolidation_schedule(
+                            _sched_client, _ws_id,
+                            task_queue=config.temporal.task_queue,
+                        )
+                    console.print(
+                        f"[green]✓[/green] Consolidation schedules (daily/weekly/monthly): "
+                        f"{len(workspace_map)} workspace(s)"
+                    )
+                except Exception as _e:
+                    from loguru import logger as _logger
+                    _logger.warning(f"Could not create consolidation schedules: {_e}")
+
+            # Job schedules (independent of consolidation)
+            if _sched_client:
+                try:
+                    from miu_bot.dispatch.schedules import ensure_job_schedules
+                    job_count = 0
+                    for _bot_name, _ws_id in workspace_map.items():
+                        bot_cfg = bots.get(_bot_name)
+                        if bot_cfg and bot_cfg.jobs:
+                            _jc = await ensure_job_schedules(
+                                _sched_client, _bot_name, _ws_id,
+                                bot_cfg.jobs,
+                                task_queue=config.temporal.task_queue,
+                            )
+                            job_count += _jc
+                    if job_count:
+                        console.print(
+                            f"[green]✓[/green] Job schedules: {job_count} job(s)"
+                        )
+                except Exception as _e:
+                    from loguru import logger as _logger
+                    _logger.warning(f"Could not create job schedules: {_e}")
 
         async def dispatch_loop():
             """Consume inbound messages and dispatch via Temporal."""
