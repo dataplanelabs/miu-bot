@@ -7,6 +7,7 @@ from typing import Any
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
     from loguru import logger
@@ -47,17 +48,23 @@ class BotSessionWorkflow:
             )
             msg = self._pending_messages.pop(0)
 
-            await workflow.execute_activity(
-                "process_message_activity",
-                args=[msg, session_info],
-                start_to_close_timeout=timedelta(minutes=5),
-                heartbeat_timeout=timedelta(seconds=60),
-                retry_policy=RetryPolicy(
-                    initial_interval=timedelta(seconds=2),
-                    maximum_interval=timedelta(seconds=30),
-                    maximum_attempts=3,
-                ),
-            )
+            try:
+                await workflow.execute_activity(
+                    "process_message_activity",
+                    args=[msg, session_info],
+                    start_to_close_timeout=timedelta(minutes=5),
+                    heartbeat_timeout=timedelta(seconds=60),
+                    retry_policy=RetryPolicy(
+                        initial_interval=timedelta(seconds=2),
+                        maximum_interval=timedelta(seconds=30),
+                        maximum_attempts=3,
+                    ),
+                )
+            except ActivityError:
+                logger.error(
+                    f"Message processing failed after retries, "
+                    f"session={session_info.get('session_id', '?')[:8]}, skipping"
+                )
 
             self._message_count += 1
 

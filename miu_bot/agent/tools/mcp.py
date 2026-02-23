@@ -1,5 +1,6 @@
 """MCP client: connects to MCP servers and wraps their tools as native miu_bot tools."""
 
+import asyncio
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -34,7 +35,6 @@ class MCPToolWrapper(Tool):
     MCP_TOOL_TIMEOUT = 120  # seconds
 
     async def execute(self, **kwargs: Any) -> str:
-        import asyncio
         from mcp import types
 
         # Filter to only params defined in schema (prevents additionalProperties errors)
@@ -78,7 +78,6 @@ async def connect_mcp_servers(
 
     Returns the number of successfully connected servers.
     """
-    import asyncio
     from mcp import ClientSession
 
     connected = 0
@@ -157,8 +156,8 @@ async def _safe_aclose(stack: AsyncExitStack) -> None:
     """Close an AsyncExitStack, suppressing anyio cancel-scope errors."""
     try:
         await stack.aclose()
-    except RuntimeError as e:
-        if "cancel scope" in str(e):
+    except (RuntimeError, asyncio.CancelledError) as e:
+        if isinstance(e, asyncio.CancelledError) or "cancel scope" in str(e):
             logger.debug(f"Suppressed cancel-scope error during MCP cleanup: {e}")
         else:
             raise
