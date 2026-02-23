@@ -35,11 +35,13 @@ def load_config(config_path: Path | None = None) -> Config:
             with open(path) as f:
                 data = json.load(f)
             data = _migrate_config(data)
-            return Config.model_validate(convert_keys(data))
+            # Use constructor (not model_validate) so pydantic-settings
+            # merges env vars (MIU_BOT_*) on top of the JSON defaults.
+            return Config(**convert_keys(data))
         except (json.JSONDecodeError, ValueError) as e:
             print(f"Warning: Failed to load config from {path}: {e}")
             print("Using default configuration.")
-    
+
     return Config()
 
 

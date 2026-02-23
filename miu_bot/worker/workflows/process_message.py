@@ -47,7 +47,6 @@ class ProcessMessageWorkflow:
         from miu_bot.worker.response import send_response
 
         workspace_id = workflow_input["workspace_id"]
-        session_id = workflow_input["session_id"]
         channel = workflow_input["channel"]
         chat_id = workflow_input["chat_id"]
         content = workflow_input["content"]
@@ -58,6 +57,12 @@ class ProcessMessageWorkflow:
         workspace = await self.backend.get_workspace(workspace_id)
         if not workspace or workspace.status != "active":
             return {"status": "skipped", "reason": "workspace_inactive"}
+
+        # Ensure session exists (keyed by workspace + channel + chat_id)
+        session = await self.backend.get_or_create_session(
+            workspace_id, channel, chat_id,
+        )
+        session_id = session.id
 
         # Create per-workspace provider
         provider, model = self._create_provider(workspace.config_overrides)

@@ -372,5 +372,8 @@ class Config(BaseSettings):
     
     model_config = ConfigDict(
         env_prefix="MIU_BOT_",
-        env_nested_delimiter="__"
+        env_nested_delimiter="__",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
     )
