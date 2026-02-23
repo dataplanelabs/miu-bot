@@ -70,18 +70,39 @@ def parse_identity(markdown: str) -> IdentityDoc:
 
 
 def render_system_prompt(identity: IdentityDoc, memories: str = "") -> str:
-    """Render identity sections into a system prompt string."""
+    """Render identity sections into a system prompt string.
+
+    If the identity contains recognized sections (identity/soul/context/skills/
+    constraints) they are rendered in order.  Otherwise the raw markdown body
+    (everything after frontmatter) is used as-is — this supports identities
+    written in any language with arbitrary section names.
+    """
     parts: list[str] = []
-    if identity.identity:
-        parts.append(f"## Identity\n{identity.identity}")
-    if identity.soul:
-        parts.append(f"## Soul\n{identity.soul}")
-    if identity.context:
-        parts.append(f"## Context\n{identity.context}")
-    if identity.skills:
-        parts.append(f"## Skills\n{identity.skills}")
-    if identity.constraints:
-        parts.append(f"## Constraints\n{identity.constraints}")
+    has_sections = any([
+        identity.identity, identity.soul, identity.context,
+        identity.skills, identity.constraints,
+    ])
+
+    if has_sections:
+        if identity.identity:
+            parts.append(f"## Identity\n{identity.identity}")
+        if identity.soul:
+            parts.append(f"## Soul\n{identity.soul}")
+        if identity.context:
+            parts.append(f"## Context\n{identity.context}")
+        if identity.skills:
+            parts.append(f"## Skills\n{identity.skills}")
+        if identity.constraints:
+            parts.append(f"## Constraints\n{identity.constraints}")
+    elif identity.raw:
+        # No recognized sections — use raw body (strip frontmatter)
+        body = identity.raw
+        if body.startswith("---"):
+            fm_parts = body.split("---", 2)
+            if len(fm_parts) >= 3:
+                body = fm_parts[2]
+        parts.append(body.strip())
+
     if memories:
         parts.append(f"## Memories\n{memories}")
     return "\n\n".join(parts)

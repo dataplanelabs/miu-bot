@@ -143,7 +143,21 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
         prompt += f"\n\n## Runtime\nTime: {now} ({tz})\n{runtime}"
         if channel and chat_id:
-            prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
+            session_info = f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
+            if channel == "zalo":
+                session_info += (
+                    "\n\nFORMATTING RULES (MANDATORY):"
+                    "\n- Zalo does NOT support markdown. NEVER use: ## headings, **bold**, *italic*, `code`, tables (|---|), or > quotes."
+                    "\n- Use plain text only: VIET HOA for headings, bullet '•' or '-' for lists, '→' for arrows, '---' for separators."
+                    "\n- NEVER use emojis as decorative headers (📋, ✅, 🎯, 💡, 📌, 🔧). Minimal emoji only if contextually needed."
+                    "\n- NEVER output tables. Use simple lists instead."
+                    "\n- Answer directly and concisely."
+                    "\n\nSENDING MEDIA:"
+                    "\n- Image: [send-image:https://direct-image-url.jpg]"
+                    "\n- File: [send-file:/absolute/path/or/https://url]"
+                    "\n- File with caption: [send-file:/path/to/file|Caption text]"
+                )
+            prompt += session_info
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": prompt}]
         messages.extend(history)
