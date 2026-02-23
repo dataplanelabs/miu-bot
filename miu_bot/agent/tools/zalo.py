@@ -37,6 +37,18 @@ class ZaloTool(Tool):
         )
 
     @property
+    def system_hint(self) -> str:
+        return (
+            "## Zalo Reminders\n"
+            "You have a `zalo` tool for managing Zalo-native reminders. "
+            "When users ask to set, create, list, or remove reminders on Zalo, "
+            "ALWAYS use the `zalo` tool (not cron). "
+            "Actions: create_reminder (requires title, optional time as ISO 8601), "
+            "list_reminders, remove_reminder (requires reminder_id). "
+            "Reminders appear in Zalo's built-in reminder UI with push notifications."
+        )
+
+    @property
     def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",

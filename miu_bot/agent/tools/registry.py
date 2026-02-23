@@ -61,6 +61,11 @@ class ToolRegistry:
         except Exception as e:
             return f"Error executing {name}: {str(e)}"
     
+    def get_system_hints(self) -> str:
+        """Collect system hints from tools that provide them."""
+        hints = [t.system_hint for t in self._tools.values() if t.system_hint]
+        return "\n\n".join(hints) if hints else ""
+
     @property
     def tool_names(self) -> list[str]:
         """Get list of registered tool names."""

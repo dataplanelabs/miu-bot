@@ -90,6 +90,16 @@ class Tool(ABC):
                 errors.extend(self._validate(item, schema["items"], f"{path}[{i}]" if path else f"[{i}]"))
         return errors
     
+    @property
+    def system_hint(self) -> str:
+        """Optional hint injected into system prompt so LLM knows when to use this tool.
+
+        Override in subclasses for tools that need explicit prompt guidance
+        (e.g. channel-specific tools the LLM might not discover from schema alone).
+        Return empty string to skip.
+        """
+        return ""
+
     def to_schema(self) -> dict[str, Any]:
         """Convert tool to OpenAI function schema format."""
         return {

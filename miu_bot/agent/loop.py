@@ -445,6 +445,11 @@ class AgentLoop:
             media=msg.media if msg.media else None,
         )
 
+        # Inject tool system hints into the system prompt
+        tool_hints = self.tools.get_system_hints()
+        if tool_hints and initial_messages and initial_messages[0]["role"] == "system":
+            initial_messages[0]["content"] += f"\n\n{tool_hints}"
+
         final_content, tools_used = await self._run_agent_loop(
             initial_messages, channel=msg.channel, chat_id=msg.chat_id,
             session_key=f"{workspace_id}:{msg.channel}:{msg.chat_id}",
