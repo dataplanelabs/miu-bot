@@ -234,7 +234,7 @@ async def ensure_job_schedules(
             logger.info(f"Created job schedule: {schedule_id} ({job.schedule})")
             count += 1
         except Exception as e:
-            if "already exists" in str(e).lower():
+            if "already" in str(e).lower():
                 try:
                     handle = client.get_schedule_handle(schedule_id)
                     await handle.update(
