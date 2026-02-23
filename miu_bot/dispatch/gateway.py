@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, TYPE_CHECKING
 
 from loguru import logger
 
 if TYPE_CHECKING:
     from temporalio.client import Client
+
+
+def _build_workflow_id(bot_name: str, channel: str, chat_id: str, session_id: str) -> str:
+    """Build a human-readable, deterministic workflow ID.
+
+    Format: ``session-{bot}-{channel}-{chat_id}``
+    Falls back to session UUID when bot_name is unavailable.
+    """
+    if bot_name:
+        # Sanitise: Temporal allows [a-zA-Z0-9._-]
+        safe = re.sub(r"[^a-zA-Z0-9._-]", "_", f"{bot_name}-{channel}-{chat_id}")
+        return f"session-{safe}"
+    return f"session-{session_id}"
 
 
 async def dispatch_message(
@@ -32,7 +46,7 @@ async def dispatch_message(
 
     from miu_bot.dispatch.workflows import BotSessionWorkflow
 
-    workflow_id = f"session-{workspace_id}-{session_id}"
+    workflow_id = _build_workflow_id(bot_name, channel, chat_id, session_id)
     msg_dict = {
         "channel": channel,
         "chat_id": chat_id,
