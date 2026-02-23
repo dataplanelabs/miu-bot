@@ -40,11 +40,17 @@ class ProcessMessageWorkflow:
 
     async def process(self, workflow_input: dict[str, Any]) -> dict[str, Any]:
         """Process a message:received event."""
+        import time as _time
+
+        from temporalio import activity
+
         from miu_bot.workspace.identity import parse_identity
         from miu_bot.agent.context import ContextBuilder
         from miu_bot.agent.processor import run_agent_loop
         from miu_bot.agent.tools.registry import ToolRegistry
         from miu_bot.worker.response import send_response
+
+        t_start = _time.monotonic()
 
         workspace_id = workflow_input["workspace_id"]
         channel = workflow_input["channel"]
@@ -108,12 +114,19 @@ class ProcessMessageWorkflow:
                 current_message=content, channel=channel, chat_id=chat_id,
             )
 
-            # Run agent loop
-            response_content, tools_used = await run_agent_loop(
+            # Run agent loop with heartbeat reporting
+            def _heartbeat(data: dict) -> None:
+                try:
+                    activity.heartbeat(data)
+                except Exception:
+                    pass  # heartbeat failures are non-fatal
+
+            response_content, tools_used, trace = await run_agent_loop(
                 provider=provider, messages=llm_messages, tools=tools,
                 model=model, temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 max_iterations=self.max_iterations,
+                on_heartbeat=_heartbeat,
             )
 
             if response_content is None:
@@ -136,7 +149,16 @@ class ProcessMessageWorkflow:
                 response_content, metadata, bot_name=bot_name,
             )
 
-            return {"status": "ok", "tools_used": tools_used}
+            total_s = round(_time.monotonic() - t_start, 2)
+            return {
+                "status": "ok",
+                "bot": bot_name,
+                "model": model,
+                "tools_used": tools_used,
+                "total_s": total_s,
+                "response_preview": response_content[:300],
+                "trace": trace,
+            }
         finally:
             try:
                 await mcp_stack.aclose()

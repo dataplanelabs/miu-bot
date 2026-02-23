@@ -44,7 +44,7 @@ class CronTaskWorkflow:
             {"role": "user", "content": task_message},
         ]
 
-        response_content, tools_used = await run_agent_loop(
+        response_content, tools_used, _trace = await run_agent_loop(
             provider=self.provider, messages=messages, tools=self.tools,
             model=self.model,
         )

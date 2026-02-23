@@ -22,18 +22,21 @@ async def run_agent_loop(
     temperature: float = 0.7,
     max_tokens: int = 4096,
     max_iterations: int = 20,
-) -> tuple[str | None, list[str]]:
+    on_heartbeat: Any = None,
+) -> tuple[str | None, list[str], list[dict[str, Any]]]:
     """Run the iterative LLM + tool execution loop.
 
     Returns:
-        Tuple of (final_content, tools_used_names).
+        Tuple of (final_content, tools_used_names, trace_events).
     """
     iteration = 0
     final_content = None
     tools_used: list[str] = []
+    trace: list[dict[str, Any]] = []
 
     while iteration < max_iterations:
         iteration += 1
+        t_llm = time.monotonic()
         try:
             response = await asyncio.wait_for(
                 provider.chat(
@@ -47,10 +50,30 @@ async def run_agent_loop(
             )
         except asyncio.TimeoutError:
             logger.warning("LLM call timed out after 180s")
-            return "Sorry, the response took too long. Please try again.", tools_used
+            trace.append({"event": "llm_timeout", "iteration": iteration})
+            return "Sorry, the response took too long. Please try again.", tools_used, trace
 
+        llm_elapsed = round(time.monotonic() - t_llm, 2)
+
+        # Record LLM call event
+        llm_event: dict[str, Any] = {
+            "event": "llm_call",
+            "iteration": iteration,
+            "model": model,
+            "latency_s": llm_elapsed,
+        }
         if response.usage:
+            llm_event["usage"] = {
+                "prompt_tokens": getattr(response.usage, "prompt_tokens", None),
+                "completion_tokens": getattr(response.usage, "completion_tokens", None),
+            }
             logger.debug(f"LLM usage: {response.usage}")
+        if response.reasoning_content:
+            llm_event["reasoning_preview"] = response.reasoning_content[:300]
+        trace.append(llm_event)
+
+        if on_heartbeat:
+            on_heartbeat({"phase": "llm_done", "iteration": iteration, "latency_s": llm_elapsed})
 
         if response.has_tool_calls:
             tool_call_dicts = [
@@ -70,13 +93,35 @@ async def run_agent_loop(
             for tool_call in response.tool_calls:
                 tools_used.append(tool_call.name)
                 logger.info(f"Tool call: {tool_call.name}")
+                t0 = time.monotonic()
                 try:
-                    t0 = time.monotonic()
                     result = await tools.execute(tool_call.name, tool_call.arguments)
-                    _record_tool_latency(tool_call.name, time.monotonic() - t0)
+                    elapsed = round(time.monotonic() - t0, 2)
+                    _record_tool_latency(tool_call.name, elapsed)
+                    tool_event = {
+                        "event": "tool_call",
+                        "iteration": iteration,
+                        "tool": tool_call.name,
+                        "args_preview": json.dumps(tool_call.arguments, ensure_ascii=False)[:200],
+                        "result_preview": (result or "")[:200],
+                        "latency_s": elapsed,
+                        "status": "ok",
+                    }
                 except Exception as e:
+                    elapsed = round(time.monotonic() - t0, 2)
                     logger.warning(f"Tool '{tool_call.name}' failed: {e}")
                     result = f"Error: tool execution failed: {e}"
+                    tool_event = {
+                        "event": "tool_call",
+                        "iteration": iteration,
+                        "tool": tool_call.name,
+                        "latency_s": elapsed,
+                        "status": "error",
+                        "error": str(e)[:200],
+                    }
+                trace.append(tool_event)
+                if on_heartbeat:
+                    on_heartbeat({"phase": "tool_done", "tool": tool_call.name, "latency_s": elapsed})
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
@@ -89,7 +134,7 @@ async def run_agent_loop(
             final_content = response.content
             break
 
-    return final_content, tools_used
+    return final_content, tools_used, trace
 
 
 async def run_agent_loop_streaming(
@@ -123,11 +168,12 @@ async def run_agent_loop_streaming(
                 max_tokens=max_tokens,
             )
         except Exception:
-            # Fallback to non-streaming
-            return await run_agent_loop(
+            # Fallback to non-streaming (drop trace for streaming callers)
+            content, used, _trace = await run_agent_loop(
                 provider, messages, tools, model,
                 temperature, max_tokens, max_iterations,
             )
+            return content, used
 
         tool_calls = None
 
