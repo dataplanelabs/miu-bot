@@ -81,6 +81,25 @@ spawn(task: str, label: str = None) -> str
 
 Use for complex or time-consuming tasks that can run independently. The subagent will complete the task and report back when done.
 
+## Zalo Reminders (Native)
+
+### zalo
+Manage Zalo-native reminders that appear in Zalo's UI with push notifications.
+```
+zalo(action: str, title: str = "", time: str = "", thread_id: str = "", thread_type: int = None, reminder_id: str = "")
+```
+
+**Actions:**
+- `create_reminder` — Create a reminder. Requires `title`. Optional: `time` (ISO 8601, e.g. `2026-02-25T10:00:00+07:00`).
+- `list_reminders` — List existing reminders in the current chat.
+- `remove_reminder` — Remove a reminder. Requires `reminder_id`.
+
+**Notes:**
+- Only works on the Zalo channel (auto-detected from context).
+- `thread_id` and `thread_type` default to the current chat context.
+- Reminders are Zalo-native — they show up in Zalo's reminder UI with push notifications.
+- **IMPORTANT:** When a user asks to set a reminder on Zalo, ALWAYS use the `zalo` tool with `create_reminder` action. Do NOT use the cron tool for Zalo reminders.
+
 ## Scheduled Reminders (Cron)
 
 Use the `exec` tool to create scheduled reminders with `miu-bot cron add`:
