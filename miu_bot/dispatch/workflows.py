@@ -51,6 +51,7 @@ class BotSessionWorkflow:
                 "process_message_activity",
                 args=[msg, session_info],
                 start_to_close_timeout=timedelta(minutes=5),
+                heartbeat_timeout=timedelta(seconds=60),
                 retry_policy=RetryPolicy(
                     initial_interval=timedelta(seconds=2),
                     maximum_interval=timedelta(seconds=30),
