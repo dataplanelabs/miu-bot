@@ -576,6 +576,7 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
             console.print(f"[green]✓[/green] Channels: {', '.join(bot_mgr.enabled_channels)}")
 
         app = create_app(backend, bus)
+        app.state.bot_mgr = bot_mgr
         uvi_config = uvicorn.Config(
             app, host=config.gateway.host, port=port, log_level="warning"
         )

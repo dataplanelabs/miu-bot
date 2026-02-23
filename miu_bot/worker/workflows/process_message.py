@@ -157,6 +157,21 @@ class ProcessMessageWorkflow:
                         extra = await connect_mcp_servers({name: cfg}, tools, mcp_stack)
                         mcp_count += extra
 
+            # Register Zalo tool for Zalo channels (HTTP proxy to gateway)
+            if channel == "zalo":
+                from miu_bot.agent.tools.zalo import ZaloTool
+                zalo_tool = ZaloTool(
+                    gateway_url=self.gateway_url,
+                    bot_name=bot_name,
+                )
+                zalo_tool.set_context(channel, chat_id)
+                tools.register(zalo_tool)
+
+            # Inject tool system hints into prompt
+            tool_hints = tools.get_system_hints()
+            if tool_hints:
+                full_prompt = f"{full_prompt}\n\n{tool_hints}"
+
             # Build LLM messages using composed prompt
             context_builder = ContextBuilder(workspace=None)
             llm_messages = context_builder.build_workspace_messages_from_prompt(

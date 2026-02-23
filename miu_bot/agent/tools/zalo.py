@@ -8,13 +8,22 @@ from miu_bot.agent.tools.base import Tool
 
 
 class ZaloTool(Tool):
-    """Tool for Zalo-specific bridge operations like reminders."""
+    """Tool for Zalo-specific bridge operations like reminders.
+
+    Supports two modes:
+    - Direct: uses send_and_wait callback (combined mode, has WS access)
+    - HTTP: proxies commands via gateway endpoint (worker mode, no WS)
+    """
 
     def __init__(
         self,
         send_and_wait: Callable[[dict, str], Awaitable[dict]] | None = None,
+        gateway_url: str = "",
+        bot_name: str = "",
     ):
         self._send_and_wait = send_and_wait
+        self._gateway_url = gateway_url
+        self._bot_name = bot_name
         self._channel = ""
         self._chat_id = ""
         self._thread_type = 1
@@ -82,6 +91,28 @@ class ZaloTool(Tool):
             "required": ["action"],
         }
 
+    async def _send_command(self, cmd: dict, expected_type: str) -> dict:
+        """Send command via direct WS or HTTP gateway proxy."""
+        if self._send_and_wait:
+            return await self._send_and_wait(cmd, expected_type)
+
+        if self._gateway_url:
+            import httpx
+
+            url = f"{self._gateway_url.rstrip('/')}/internal/zalo/command"
+            payload = {
+                "bot_name": self._bot_name,
+                "cmd": cmd,
+                "expected_type": expected_type,
+            }
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(url, json=payload)
+                if resp.status_code != 200:
+                    return {"type": "error", "error": f"Gateway error: {resp.status_code}"}
+                return resp.json()
+
+        return {"type": "error", "error": "Zalo bridge not configured"}
+
     async def execute(
         self,
         action: str,
@@ -94,7 +125,7 @@ class ZaloTool(Tool):
     ) -> str:
         if self._channel != "zalo":
             return "Error: zalo tool only works on the Zalo channel"
-        if not self._send_and_wait:
+        if not self._send_and_wait and not self._gateway_url:
             return "Error: Zalo bridge not configured"
 
         tid = thread_id or self._chat_id
@@ -119,14 +150,14 @@ class ZaloTool(Tool):
         }
         if time:
             cmd["time"] = time
-        resp = await self._send_and_wait(cmd, "reminder-created")
+        resp = await self._send_command(cmd, "reminder-created")
         if resp.get("type") == "error":
             return f"Error: {resp.get('error')}"
         return f"Reminder created: {title}" + (f" at {time}" if time else "")
 
     async def _list_reminders(self, tid: str, tt: int) -> str:
         cmd = {"type": "list-reminders", "threadId": tid, "threadType": tt}
-        resp = await self._send_and_wait(cmd, "reminders")
+        resp = await self._send_command(cmd, "reminders")
         if resp.get("type") == "error":
             return f"Error: {resp.get('error')}"
         reminders = resp.get("reminders", [])
@@ -148,7 +179,7 @@ class ZaloTool(Tool):
             "threadId": tid,
             "threadType": tt,
         }
-        resp = await self._send_and_wait(cmd, "reminder-removed")
+        resp = await self._send_command(cmd, "reminder-removed")
         if resp.get("type") == "error":
             return f"Error: {resp.get('error')}"
         return f"Reminder {reminder_id} removed."
