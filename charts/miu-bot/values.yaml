@@ -70,6 +70,10 @@ autoscaling:
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
 
+# -- Database migration (runs as Helm pre-upgrade hook)
+migration:
+  enabled: true
+
 # -- Bot definitions (mounted as /etc/miu-bot/bots.yaml in gateway)
 # Secrets referenced via *_env suffix (resolved from existingSecret env vars)
 bots: {}

@@ -2,7 +2,7 @@ apiVersion: v2
 name: miu-bot
 description: MiuBot - AI-powered chatbot gateway and worker
 type: application
-version: 0.6.0
+version: 0.6.1
 appVersion: "0.6.0"
 maintainers:
   - name: dataplanelabs

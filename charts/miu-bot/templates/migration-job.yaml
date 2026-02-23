@@ -1,0 +1,47 @@
+{{- if .Values.migration.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: miubot-migrate-{{ .Release.Revision }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "miu-bot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      labels:
+        {{- include "miu-bot.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: {{ include "miu-bot.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["miubot", "db", "migrate"]
+          envFrom:
+            - configMapRef:
+                name: miubot-config
+            - secretRef:
+                name: {{ .Values.existingSecret }}
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          securityContext:
+            allowPrivilegeEscalation: false
+{{- end }}
