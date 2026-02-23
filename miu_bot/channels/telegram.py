@@ -352,7 +352,12 @@ class TelegramChannel(BaseChannel):
                 await file.download_to_drive(str(file_path))
                 
                 media_paths.append(str(file_path))
-                
+
+                # Build download URL for remote vision tools
+                download_url = file.file_path  # Telegram API relative path
+                if download_url and self.config.token:
+                    download_url = f"https://api.telegram.org/file/bot{self.config.token}/{download_url}"
+
                 # Handle voice transcription
                 if media_type == "voice" or media_type == "audio":
                     from miu_bot.providers.transcription import GroqTranscriptionProvider
@@ -364,7 +369,9 @@ class TelegramChannel(BaseChannel):
                     else:
                         content_parts.append(f"[{media_type}: {file_path}]")
                 else:
-                    content_parts.append(f"[{media_type}: {file_path}]")
+                    # Use download URL for images so vision MCP tools can access them
+                    source = download_url if download_url else str(file_path)
+                    content_parts.append(f"[{media_type}: {source}]")
                     
                 logger.debug(f"Downloaded {media_type} to {file_path}")
             except Exception as e:
