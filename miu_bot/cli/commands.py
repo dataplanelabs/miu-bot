@@ -564,6 +564,7 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
                     create_daily_consolidation_schedule,
                     create_weekly_consolidation_schedule,
                     create_monthly_consolidation_schedule,
+                    ensure_job_schedules,
                 )
 
                 _sched_client = await _tc(
@@ -586,6 +587,22 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
                     f"[green]✓[/green] Consolidation schedules (daily/weekly/monthly): "
                     f"{len(workspace_map)} workspace(s)"
                 )
+
+                # Create Temporal job schedules for bots with jobs
+                job_count = 0
+                for _bot_name, _ws_id in workspace_map.items():
+                    bot_cfg = bots.get(_bot_name)
+                    if bot_cfg and bot_cfg.jobs:
+                        _jc = await ensure_job_schedules(
+                            _sched_client, _bot_name, _ws_id,
+                            bot_cfg.jobs,
+                            task_queue=config.temporal.task_queue,
+                        )
+                        job_count += _jc
+                if job_count:
+                    console.print(
+                        f"[green]✓[/green] Job schedules: {job_count} job(s)"
+                    )
             except Exception as _e:
                 from loguru import logger as _logger
                 _logger.warning(f"Could not create consolidation schedules: {_e}")

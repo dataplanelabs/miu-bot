@@ -118,7 +118,24 @@ async def consolidate_memory_activity(
 
 @activity.defn
 async def run_cron_activity(task_info: dict[str, Any]) -> dict[str, Any]:
-    """Run a scheduled cron task."""
-    logger.info(f"Cron activity: {task_info.get('name', 'unnamed')}")
-    # Cron execution will be wired in Phase 4+
-    return {"status": "not_implemented"}
+    """Execute a scheduled cron job through the bot's agent loop."""
+    from miu_bot.dispatch.worker import get_activity_deps
+    from miu_bot.worker.workflows.cron_task import CronTaskProcessor
+
+    logger.info(
+        f"Cron job: bot={task_info.get('bot_name')} "
+        f"job={task_info.get('job_name')}"
+    )
+
+    deps = get_activity_deps()
+    processor = CronTaskProcessor(
+        backend=deps["backend"],
+        gateway_url=deps["gateway_url"],
+        fallback_model=deps.get("fallback_model", ""),
+        fallback_api_key=deps.get("fallback_api_key", ""),
+        fallback_api_base=deps.get("fallback_api_base"),
+        max_tokens=deps.get("max_tokens", 4096),
+        temperature=deps.get("temperature", 0.7),
+        max_iterations=deps.get("max_iterations", 20),
+    )
+    return await processor.process(task_info)

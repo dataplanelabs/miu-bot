@@ -43,6 +43,23 @@ class BotToolsConfig(BaseModel):
     mcp_servers: dict[str, BotMCPServerConfig] = Field(default_factory=dict)
 
 
+class JobTarget(BaseModel):
+    """Target channel/group for cron job output."""
+    channel: str
+    chat_id: str = ""
+    chat_id_env: str = ""
+
+
+class JobConfig(BaseModel):
+    """Cron job definition for a bot."""
+    description: str = ""
+    schedule: str  # Cron expression e.g. "0 8 * * 1-6"
+    timezone: str = "UTC"
+    enabled: bool = True
+    prompt: str  # What to ask the bot
+    targets: list[JobTarget] = Field(default_factory=list)
+
+
 class BotConfig(BaseModel):
     """Single bot definition from bots.yaml."""
     name: str = ""  # Set from dict key
@@ -59,6 +76,7 @@ class BotConfig(BaseModel):
     tools: BotToolsConfig = Field(default_factory=BotToolsConfig)
     skills: list[dict] = Field(default_factory=list)  # BotSkillRef dicts
     tools_preset: str = ""  # Reference to tools_presets key
+    jobs: dict[str, JobConfig] = Field(default_factory=dict)
 
 
 def _resolve_env_fields(data: dict[str, Any]) -> dict[str, Any]:

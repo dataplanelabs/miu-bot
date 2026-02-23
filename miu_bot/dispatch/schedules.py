@@ -167,6 +167,86 @@ async def create_monthly_consolidation_schedule(
             raise
 
 
+async def ensure_job_schedules(
+    client: "Client",
+    bot_name: str,
+    workspace_id: str,
+    jobs: dict,
+    task_queue: str = "default-tasks",
+) -> int:
+    """Create Temporal schedules for bot cron jobs. Idempotent.
+
+    Returns number of schedules created/updated.
+    """
+    from temporalio.client import (
+        Schedule,
+        ScheduleActionStartWorkflow,
+        ScheduleOverlapPolicy,
+        SchedulePolicy,
+        ScheduleSpec,
+        ScheduleState,
+        ScheduleUpdate,
+    )
+
+    count = 0
+    for job_name, job in jobs.items():
+        if not job.enabled:
+            logger.debug(f"Job {bot_name}:{job_name} disabled, skipping")
+            continue
+        if not job.targets:
+            logger.warning(f"Job {bot_name}:{job_name} has no targets, skipping")
+            continue
+
+        schedule_id = f"job:{bot_name}:{job_name}"
+        task_info = {
+            "workspace_id": workspace_id,
+            "bot_name": bot_name,
+            "job_name": job_name,
+            "prompt": job.prompt,
+            "targets": [t.model_dump() for t in job.targets],
+        }
+
+        schedule = Schedule(
+            action=ScheduleActionStartWorkflow(
+                "CronTaskWorkflow",
+                args=[task_info],
+                id=f"cron-job-{bot_name}-{job_name}",
+                task_queue=task_queue,
+            ),
+            spec=ScheduleSpec(
+                cron_expressions=[job.schedule],
+                jitter=timedelta(minutes=2),
+                timezone_name=job.timezone or "UTC",
+            ),
+            policy=SchedulePolicy(
+                overlap=ScheduleOverlapPolicy.SKIP,
+            ),
+            state=ScheduleState(
+                note=f"Cron job: {bot_name}/{job_name} - {job.description}",
+            ),
+        )
+
+        try:
+            await client.create_schedule(schedule_id, schedule)
+            logger.info(f"Created job schedule: {schedule_id} ({job.schedule})")
+            count += 1
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                try:
+                    handle = client.get_schedule_handle(schedule_id)
+                    await handle.update(
+                        lambda _: ScheduleUpdate(schedule=schedule)
+                    )
+                    logger.debug(f"Updated job schedule: {schedule_id}")
+                    count += 1
+                except Exception as ue:
+                    logger.warning(f"Failed to update schedule {schedule_id}: {ue}")
+            else:
+                logger.error(f"Failed to create schedule {schedule_id}: {e}")
+
+    return count
+
+
 async def delete_consolidation_schedule(
     client: "Client",
     workspace_id: str,
