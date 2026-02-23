@@ -103,20 +103,29 @@ async def connect_mcp_servers(
                         stdio_client(params)
                     )
                 elif _cfg.url:
-                    from mcp.client.streamable_http import streamable_http_client
-                    import httpx
-                    # Always include MCP-required Accept header; merge with
-                    # user-supplied headers (e.g. Authorization)
-                    all_headers = {
-                        "Accept": "text/event-stream, application/json",
-                        **(_cfg.headers or {}),
-                    }
-                    http_client = await server_stack.enter_async_context(
-                        httpx.AsyncClient(headers=all_headers)
-                    )
-                    read, write, _ = await server_stack.enter_async_context(
-                        streamable_http_client(_cfg.url, http_client=http_client)
-                    )
+                    url = _cfg.url
+                    # SSE transport: sse:// scheme for supergateway-wrapped servers
+                    if url.startswith("sse://"):
+                        from mcp.client.sse import sse_client
+                        http_url = url.replace("sse://", "http://", 1)
+                        all_headers = {**(_cfg.headers or {})}
+                        read, write = await server_stack.enter_async_context(
+                            sse_client(http_url, headers=all_headers)
+                        )
+                    else:
+                        # Streamable HTTP (default for native MCP servers)
+                        from mcp.client.streamable_http import streamable_http_client
+                        import httpx
+                        all_headers = {
+                            "Accept": "text/event-stream, application/json",
+                            **(_cfg.headers or {}),
+                        }
+                        http_client = await server_stack.enter_async_context(
+                            httpx.AsyncClient(headers=all_headers)
+                        )
+                        read, write, _ = await server_stack.enter_async_context(
+                            streamable_http_client(url, http_client=http_client)
+                        )
                 else:
                     return
 
