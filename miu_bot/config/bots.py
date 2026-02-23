@@ -31,6 +31,7 @@ class BotMCPServerConfig(BaseModel):
     """Per-bot MCP server config (HTTP only for V1)."""
     url: str = ""
     headers: dict[str, str] = Field(default_factory=dict)
+    headers_env: dict[str, str] = Field(default_factory=dict)  # Env var names, worker resolves
     # stdio fields (deferred to V2)
     command: str = ""
     args: list[str] = Field(default_factory=list)

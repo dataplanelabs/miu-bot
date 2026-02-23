@@ -292,6 +292,7 @@ class MCPServerConfig(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)  # Stdio: extra env vars
     url: str = ""  # HTTP: streamable HTTP endpoint URL
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP: custom headers (e.g. Authorization)
+    headers_env: dict[str, str] = Field(default_factory=dict)  # Env var names, resolved at runtime
 
 
 class ToolsConfig(BaseModel):
