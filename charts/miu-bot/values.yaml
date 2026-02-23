@@ -57,11 +57,11 @@ worker:
   terminationGracePeriodSeconds: 120
   resources:
     requests:
-      memory: "512Mi"
-      cpu: "200m"
+      memory: "768Mi"
+      cpu: "350m"
     limits:
-      memory: "1Gi"
-      cpu: "1000m"
+      memory: "1536Mi"
+      cpu: "1500m"
 
 # -- Horizontal Pod Autoscaler for worker
 autoscaling:
