@@ -86,6 +86,34 @@ class ConsolidationLogEntry:
     created_at: datetime
 
 
+@dataclass
+class WorkspaceTemplate:
+    id: str
+    workspace_id: str
+    template_type: str  # soul | user | agents | heartbeat
+    content: str
+    config: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass
+class WorkspaceSkill:
+    id: str
+    workspace_id: str
+    name: str
+    description: str
+    identity: str  # Prompt fragment
+    rules: list[str]
+    mcp_servers: dict[str, Any]
+    tags: list[str]
+    source: str  # inline | local:/path | git:org/repo/skill
+    source_version: str
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
 @runtime_checkable
 class MemoryBackend(Protocol):
     """Protocol for pluggable storage backends."""
@@ -170,3 +198,16 @@ class MemoryBackend(Protocol):
     async def delete_old_daily_notes(
         self, workspace_id: str, older_than: datetime
     ) -> int: ...
+
+    # Workspace templates
+    async def upsert_template(
+        self, workspace_id: str, template_type: str, content: str,
+        config: dict[str, Any] | None = None,
+    ) -> WorkspaceTemplate: ...
+    async def get_templates(self, workspace_id: str) -> list[WorkspaceTemplate]: ...
+
+    # Workspace skills
+    async def upsert_skill(self, workspace_id: str, skill: WorkspaceSkill) -> WorkspaceSkill: ...
+    async def get_skills(
+        self, workspace_id: str, enabled_only: bool = True,
+    ) -> list[WorkspaceSkill]: ...

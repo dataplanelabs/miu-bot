@@ -45,7 +45,7 @@ class ProcessMessageWorkflow:
         from temporalio import activity
 
         from miu_bot.observability.spans import get_tracer
-        from miu_bot.workspace.identity import parse_identity
+        from miu_bot.workspace.identity import parse_identity, render_system_prompt
         from miu_bot.agent.context import ContextBuilder
         from miu_bot.agent.processor import run_agent_loop
         from miu_bot.agent.tools.registry import ToolRegistry
@@ -94,18 +94,11 @@ class ProcessMessageWorkflow:
         mcp_stack = AsyncExitStack()
         await mcp_stack.__aenter__()
         try:
-            # Build augmented prompt from skills
-            augmented_identity = workspace.identity
-            skill_dicts = workspace.config_overrides.get("skills", [])
-            if skill_dicts:
-                from miu_bot.skills.merger import merge_skills_into_prompt
-                from miu_bot.skills.schema import SkillConfig
+            # Load templates and skills from DB
+            templates = await self.backend.get_templates(workspace_id)
+            db_skills = await self.backend.get_skills(workspace_id)
 
-                skills = [SkillConfig.model_validate(s) for s in skill_dicts]
-                augmented_identity, _, _ = merge_skills_into_prompt(
-                    workspace.identity, skills
-                )
-
+            # Connect MCP servers from config_overrides
             mcp_count = await self._connect_mcp(
                 workspace.config_overrides, tools, mcp_stack
             )
@@ -119,16 +112,55 @@ class ProcessMessageWorkflow:
 
             # Use tier-based context assembly (BASB)
             from miu_bot.memory.context_assembly import assemble_memory_context
+            from miu_bot.workspace.identity import compose_from_templates
 
-            identity = parse_identity(augmented_identity)
             memories_text = await assemble_memory_context(
                 self.backend, workspace_id, query=content
             )
             history = [{"role": m.role, "content": m.content} for m in messages]
 
+            # Compose base prompt: templates (new) or identity (legacy)
+            if templates:
+                base_prompt = compose_from_templates(templates, memories_text)
+            else:
+                identity = parse_identity(workspace.identity)
+                base_prompt = render_system_prompt(identity, memories_text)
+
+            # Merge skills: DB (new) or config_overrides (legacy fallback)
+            skills_section = ""
+            skill_mcp: dict = {}
+            if db_skills:
+                from miu_bot.skills.merger import merge_skills_from_db
+                skills_section, skill_mcp, _ = merge_skills_from_db(db_skills)
+            else:
+                skill_dicts = workspace.config_overrides.get("skills", [])
+                if skill_dicts:
+                    from miu_bot.skills.merger import merge_skills_into_prompt
+                    from miu_bot.skills.schema import SkillConfig
+                    skills = [SkillConfig.model_validate(s) for s in skill_dicts]
+                    skills_section, skill_mcp, _ = merge_skills_into_prompt("", skills)
+
+            # Combine base prompt + skills
+            full_prompt = base_prompt
+            if skills_section:
+                full_prompt = f"{base_prompt}\n\n{skills_section}"
+
+            # Connect skill-provided MCP servers
+            if skill_mcp:
+                from miu_bot.config.bots import _resolve_env_fields
+                from miu_bot.config.schema import MCPServerConfig
+                from miu_bot.agent.tools.mcp import connect_mcp_servers
+                for name, cfg_dict in skill_mcp.items():
+                    resolved = _resolve_env_fields(cfg_dict)
+                    cfg = MCPServerConfig.model_validate(resolved)
+                    if cfg.url:
+                        extra = await connect_mcp_servers({name: cfg}, tools, mcp_stack)
+                        mcp_count += extra
+
+            # Build LLM messages using composed prompt
             context_builder = ContextBuilder(workspace=None)
-            llm_messages = context_builder.build_workspace_messages(
-                identity=identity, memories=memories_text, history=history,
+            llm_messages = context_builder.build_workspace_messages_from_prompt(
+                prompt=full_prompt, history=history,
                 current_message=content, channel=channel, chat_id=chat_id,
             )
 

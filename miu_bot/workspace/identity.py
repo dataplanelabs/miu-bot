@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import yaml
+
+if TYPE_CHECKING:
+    from miu_bot.db.backend import WorkspaceTemplate
 
 
 @dataclass
@@ -105,4 +109,27 @@ def render_system_prompt(identity: IdentityDoc, memories: str = "") -> str:
 
     if memories:
         parts.append(f"## Memories\n{memories}")
+    return "\n\n".join(parts)
+
+
+def compose_from_templates(
+    templates: list["WorkspaceTemplate"],
+    memories: str = "",
+) -> str:
+    """Compose system prompt from separated workspace templates.
+
+    Assembles soul + user + agents in order, with memories appended.
+    """
+    parts: list[str] = []
+
+    # Order: soul -> user -> agents
+    template_map = {t.template_type: t for t in templates}
+    for ttype in ("soul", "user", "agents"):
+        tmpl = template_map.get(ttype)
+        if tmpl and tmpl.content.strip():
+            parts.append(f"## {ttype.title()}\n{tmpl.content.strip()}")
+
+    if memories:
+        parts.append(f"## Memories\n{memories}")
+
     return "\n\n".join(parts)

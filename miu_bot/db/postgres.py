@@ -16,6 +16,8 @@ from miu_bot.db.backend import (
     Message,
     Session,
     Workspace,
+    WorkspaceSkill,
+    WorkspaceTemplate,
 )
 
 try:
@@ -348,6 +350,78 @@ class PostgresBackend:
         )
         return int(tag.split()[-1])
 
+    # -- Workspace templates --
+
+    async def upsert_template(
+        self, workspace_id: str, template_type: str, content: str,
+        config: dict[str, Any] | None = None,
+    ) -> WorkspaceTemplate:
+        tmpl_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
+        config_json = json.dumps(config or {})
+        row = await self._pool.fetchrow(
+            """INSERT INTO workspace_templates
+                   (id, workspace_id, template_type, content, config, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5::jsonb, $6, $6)
+               ON CONFLICT (workspace_id, template_type) DO UPDATE
+               SET content = EXCLUDED.content, config = EXCLUDED.config,
+                   updated_at = EXCLUDED.updated_at
+               RETURNING *""",
+            tmpl_id, workspace_id, template_type, content, config_json, now,
+        )
+        return self._row_to_template(row)
+
+    async def get_templates(self, workspace_id: str) -> list[WorkspaceTemplate]:
+        rows = await self._pool.fetch(
+            "SELECT * FROM workspace_templates WHERE workspace_id = $1 ORDER BY template_type",
+            workspace_id,
+        )
+        return [self._row_to_template(r) for r in rows]
+
+    # -- Workspace skills --
+
+    async def upsert_skill(
+        self, workspace_id: str, skill: WorkspaceSkill,
+    ) -> WorkspaceSkill:
+        skill_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
+        row = await self._pool.fetchrow(
+            """INSERT INTO workspace_skills
+                   (id, workspace_id, name, description, identity, rules, mcp_servers,
+                    tags, source, source_version, enabled, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb,
+                       $9, $10, $11, $12, $12)
+               ON CONFLICT (workspace_id, name) DO UPDATE
+               SET description = EXCLUDED.description, identity = EXCLUDED.identity,
+                   rules = EXCLUDED.rules, mcp_servers = EXCLUDED.mcp_servers,
+                   tags = EXCLUDED.tags, source = EXCLUDED.source,
+                   source_version = EXCLUDED.source_version, enabled = EXCLUDED.enabled,
+                   updated_at = EXCLUDED.updated_at
+               RETURNING *""",
+            skill_id, workspace_id, skill.name, skill.description, skill.identity,
+            json.dumps(skill.rules), json.dumps(skill.mcp_servers),
+            json.dumps(skill.tags), skill.source, skill.source_version,
+            skill.enabled, now,
+        )
+        return self._row_to_skill(row)
+
+    async def get_skills(
+        self, workspace_id: str, enabled_only: bool = True,
+    ) -> list[WorkspaceSkill]:
+        if enabled_only:
+            rows = await self._pool.fetch(
+                """SELECT * FROM workspace_skills
+                   WHERE workspace_id = $1 AND enabled = TRUE
+                   ORDER BY name""",
+                workspace_id,
+            )
+        else:
+            rows = await self._pool.fetch(
+                "SELECT * FROM workspace_skills WHERE workspace_id = $1 ORDER BY name",
+                workspace_id,
+            )
+        return [self._row_to_skill(r) for r in rows]
+
     # -- Row mappers --
 
     @staticmethod
@@ -419,4 +493,37 @@ class PostgresBackend:
             message_count=row.get("message_count", 0),
             consolidated=row.get("consolidated", False),
             created_at=row["created_at"],
+        )
+
+    @staticmethod
+    def _row_to_template(row: Any) -> WorkspaceTemplate:
+        config = row["config"]
+        if isinstance(config, str):
+            config = json.loads(config)
+        return WorkspaceTemplate(
+            id=row["id"], workspace_id=row["workspace_id"],
+            template_type=row["template_type"], content=row["content"],
+            config=config or {},
+            created_at=row["created_at"], updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _row_to_skill(row: Any) -> WorkspaceSkill:
+        rules = row["rules"]
+        if isinstance(rules, str):
+            rules = json.loads(rules)
+        mcp = row["mcp_servers"]
+        if isinstance(mcp, str):
+            mcp = json.loads(mcp)
+        tags = row["tags"]
+        if isinstance(tags, str):
+            tags = json.loads(tags)
+        return WorkspaceSkill(
+            id=row["id"], workspace_id=row["workspace_id"],
+            name=row["name"], description=row["description"],
+            identity=row["identity"], rules=rules or [],
+            mcp_servers=mcp or {}, tags=tags or [],
+            source=row["source"], source_version=row["source_version"],
+            enabled=row["enabled"],
+            created_at=row["created_at"], updated_at=row["updated_at"],
         )

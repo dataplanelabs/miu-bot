@@ -327,10 +327,10 @@ def _create_backend(config):
 async def _ensure_workspaces(
     bots: dict[str, Any],
     workspace_service: Any,
+    backend: Any = None,
 ) -> dict[str, str]:
     """Ensure workspaces exist for all bots. Returns {bot_name: workspace_id}."""
-    from miu_bot.skills.loader import discover_local_skills, resolve_bot_skills
-    from miu_bot.skills.schema import BotSkillRef
+    from miu_bot.skills.resolver import resolve_skill_sources
     from loguru import logger
 
     workspace_map: dict[str, str] = {}
@@ -348,14 +348,7 @@ async def _ensure_workspaces(
                 mcp_dict[srv_name] = srv_cfg.model_dump(exclude_defaults=True)
             config_overrides["tools"] = {"mcp_servers": mcp_dict}
 
-        # Skills (resolve from skill refs if present)
-        if bot_cfg.skills:
-            skill_refs = [BotSkillRef.model_validate(s) for s in bot_cfg.skills]
-            resolved_skills = resolve_bot_skills(skill_refs, {}, {})
-            if resolved_skills:
-                config_overrides["skills"] = [
-                    s.model_dump(exclude_defaults=True) for s in resolved_skills
-                ]
+        # NOTE: skills no longer go into config_overrides — synced to workspace_skills table
 
         # Channel allowFrom (for reference)
         channels_cfg = {}
@@ -364,12 +357,46 @@ async def _ensure_workspaces(
         if channels_cfg:
             config_overrides["channels"] = channels_cfg
 
+        # Determine identity text for backward compat
+        identity_text = bot_cfg.identity
+
         ws = await workspace_service.get_or_create(
             name=bot_name,
-            identity_text=bot_cfg.identity,
+            identity_text=identity_text,
             config_overrides=config_overrides,
         )
         workspace_map[bot_name] = ws.id
+
+        # Sync templates (soul, user, agents) to workspace_templates table
+        if backend:
+            has_templates = any([bot_cfg.soul, bot_cfg.user, bot_cfg.agents])
+            if has_templates:
+                for ttype, content in [
+                    ("soul", bot_cfg.soul),
+                    ("user", bot_cfg.user),
+                    ("agents", bot_cfg.agents),
+                ]:
+                    if content:
+                        await backend.upsert_template(ws.id, ttype, content)
+                logger.info(f"Synced templates for workspace '{bot_name}'")
+
+            # Sync skills to workspace_skills table (YAML is source of truth)
+            if bot_cfg.skills:
+                ws_skills = resolve_skill_sources(bot_cfg.skills)
+                synced_names = set()
+                for ws_skill in ws_skills:
+                    ws_skill.workspace_id = ws.id
+                    await backend.upsert_skill(ws.id, ws_skill)
+                    synced_names.add(ws_skill.name)
+                # Disable stale skills not in current YAML
+                existing = await backend.get_skills(ws.id, enabled_only=False)
+                for existing_skill in existing:
+                    if existing_skill.name not in synced_names:
+                        existing_skill.enabled = False
+                        await backend.upsert_skill(ws.id, existing_skill)
+                        logger.info(f"Disabled stale skill '{existing_skill.name}' for '{bot_name}'")
+                logger.info(f"Synced {len(ws_skills)} skill(s) for workspace '{bot_name}'")
+
         logger.info(f"Workspace '{bot_name}' → {ws.id[:8]}")
 
     return workspace_map
@@ -515,7 +542,7 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
         workspace_service = WorkspaceService(backend)
         workspace_map: dict[str, str] = {}
         if bots:
-            workspace_map = await _ensure_workspaces(bots, workspace_service)
+            workspace_map = await _ensure_workspaces(bots, workspace_service, backend)
             console.print(f"[green]✓[/green] {len(workspace_map)} workspace(s) synced")
 
         # Create bot manager with channel instances

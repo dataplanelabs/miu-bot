@@ -46,7 +46,14 @@ class BotToolsConfig(BaseModel):
 class BotConfig(BaseModel):
     """Single bot definition from bots.yaml."""
     name: str = ""  # Set from dict key
-    identity: str = ""
+    identity: str = ""  # Legacy (backward compat — used if soul/user/agents absent)
+    # Separated workspace templates (new)
+    soul: str = ""
+    user: str = ""
+    agents: str = ""
+    # Heartbeat config (schema only, separate plan)
+    heartbeat: dict[str, Any] = Field(default_factory=dict)
+    # Existing fields
     provider: BotProviderConfig = Field(default_factory=BotProviderConfig)
     channels: dict[str, BotChannelConfig] = Field(default_factory=dict)
     tools: BotToolsConfig = Field(default_factory=BotToolsConfig)

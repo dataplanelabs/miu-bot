@@ -339,3 +339,20 @@ class FileBackend:
         self, workspace_id: str, older_than: Any
     ) -> int:
         return 0
+
+    # -- Workspace templates/skills stubs (not supported in file backend) --
+
+    async def upsert_template(
+        self, workspace_id: str, template_type: str, content: str,
+        config: dict[str, Any] | None = None,
+    ) -> Any:
+        return None
+
+    async def get_templates(self, workspace_id: str) -> list:
+        return []
+
+    async def upsert_skill(self, workspace_id: str, skill: Any) -> Any:
+        return None
+
+    async def get_skills(self, workspace_id: str, enabled_only: bool = True) -> list:
+        return []

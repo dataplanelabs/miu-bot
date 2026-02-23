@@ -10,6 +10,32 @@ from miu_bot.agent.memory import MemoryStore
 from miu_bot.agent.skills import SkillsLoader
 
 
+_ZALO_FORMATTING_RULES = (
+    "\n\nFORMATTING RULES (MANDATORY):"
+    "\n- Zalo does NOT support markdown. NEVER use: ## headings, **bold**, *italic*, `code`, tables (|---|), or > quotes."
+    "\n- Use plain text only: VIET HOA for headings, bullet '-' for lists, '---' for separators."
+    "\n- NEVER use emojis as decorative headers. Minimal emoji only if contextually needed."
+    "\n- NEVER output tables. Use simple lists instead."
+    "\n- Answer directly and concisely."
+    "\n\nSENDING MEDIA:"
+    "\n- Image: [send-image:https://direct-image-url.jpg]"
+    "\n- File: [send-file:/absolute/path/or/https://url]"
+    "\n- File with caption: [send-file:/path/to/file|Caption text]"
+    "\n- Use send-image for jpg/png/gif/webp; send-file for pdf/zip/docx/etc."
+    "\n- IMPORTANT: URLs must be DIRECT image links. Never guess or fabricate URLs."
+)
+
+
+def _append_session_info(prompt: str, channel: str | None, chat_id: str | None) -> str:
+    """Append channel/session info to prompt (shared by all build methods)."""
+    if not channel or not chat_id:
+        return prompt
+    session_info = f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
+    if channel == "zalo":
+        session_info += _ZALO_FORMATTING_RULES
+    return prompt + session_info
+
+
 class ContextBuilder:
     """
     Builds the context (system prompt + messages) for the agent.
@@ -142,22 +168,32 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
         prompt += f"\n\n## Runtime\nTime: {now} ({tz})\n{runtime}"
-        if channel and chat_id:
-            session_info = f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
-            if channel == "zalo":
-                session_info += (
-                    "\n\nFORMATTING RULES (MANDATORY):"
-                    "\n- Zalo does NOT support markdown. NEVER use: ## headings, **bold**, *italic*, `code`, tables (|---|), or > quotes."
-                    "\n- Use plain text only: VIET HOA for headings, bullet '•' or '-' for lists, '→' for arrows, '---' for separators."
-                    "\n- NEVER use emojis as decorative headers (📋, ✅, 🎯, 💡, 📌, 🔧). Minimal emoji only if contextually needed."
-                    "\n- NEVER output tables. Use simple lists instead."
-                    "\n- Answer directly and concisely."
-                    "\n\nSENDING MEDIA:"
-                    "\n- Image: [send-image:https://direct-image-url.jpg]"
-                    "\n- File: [send-file:/absolute/path/or/https://url]"
-                    "\n- File with caption: [send-file:/path/to/file|Caption text]"
-                )
-            prompt += session_info
+        prompt = _append_session_info(prompt, channel, chat_id)
+
+        messages: list[dict[str, Any]] = [{"role": "system", "content": prompt}]
+        messages.extend(history)
+        user_content = self._build_user_content(current_message, media)
+        messages.append({"role": "user", "content": user_content})
+        return messages
+
+    def build_workspace_messages_from_prompt(
+        self,
+        prompt: str,
+        history: list[dict[str, Any]],
+        current_message: str,
+        channel: str | None = None,
+        chat_id: str | None = None,
+        media: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Build messages using a pre-composed prompt string."""
+        from datetime import datetime
+        import time as _time
+        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        tz = _time.strftime("%Z") or "UTC"
+        system = platform.system()
+        runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
+        prompt += f"\n\n## Runtime\nTime: {now} ({tz})\n{runtime}"
+        prompt = _append_session_info(prompt, channel, chat_id)
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": prompt}]
         messages.extend(history)
@@ -192,28 +228,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
 
         # System prompt
         system_prompt = self.build_system_prompt(skill_names)
-        if channel and chat_id:
-            session_info = f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
-            # Channel-specific formatting rules
-            if channel == "zalo":
-                session_info += (
-                    "\n\nFORMATTING RULES (MANDATORY):"
-                    "\n- Zalo does NOT support markdown. NEVER use: ## headings, **bold**, *italic*, `code`, tables (|---|), or > quotes."
-                    "\n- Use plain text only: VIET HOA for headings, bullet '•' or '-' for lists, '→' for arrows, '---' for separators."
-                    "\n- NEVER use emojis as decorative headers (📋, ✅, 🎯, 💡, 📌, 🔧). Minimal emoji only if contextually needed."
-                    "\n- NEVER output tables. Use simple lists instead."
-                    "\n- NEVER output 'Reflection', 'Next Steps', or 'Option A/B/C' sections unless explicitly asked."
-                    "\n- Answer directly and concisely."
-                    "\n\nSENDING MEDIA:"
-                    "\n- Image: [send-image:https://direct-image-url.jpg]"
-                    "\n- File: [send-file:/absolute/path/or/https://url]"
-                    "\n- File with caption: [send-file:/path/to/file|Caption text]"
-                    "\n- Use send-image for jpg/png/gif/webp; send-file for pdf/zip/docx/etc."
-                    "\n- IMPORTANT: URLs must be DIRECT image links (ending in .jpg/.png/.webp etc). Never guess or fabricate URLs."
-                    "\n- To find images: use web_fetch on a webpage, then extract actual <img src> URLs from the content."
-                    "\n- Do NOT use thumbnail URLs from search snippets — they are often broken. Fetch the page first."
-                )
-            system_prompt += session_info
+        system_prompt = _append_session_info(system_prompt, channel, chat_id)
         messages.append({"role": "system", "content": system_prompt})
 
         # History
