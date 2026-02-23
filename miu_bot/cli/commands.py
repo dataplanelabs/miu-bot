@@ -304,15 +304,32 @@ def _make_provider(config):
 
 def _setup_logging(verbose: bool):
     """Configure logging for serve modes."""
+    import logging
     from loguru import logger
     import sys as _sys
     logger.remove()
     if verbose:
-        import logging
         logging.basicConfig(level=logging.DEBUG)
         logger.add(_sys.stderr, level="DEBUG", format="<green>{time:HH:mm:ss}</green> | <level>{level:<7}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>")
     else:
         logger.add(_sys.stderr, level="INFO", format="<green>{time:HH:mm:ss}</green> | <level>{level:<7}</level> | <level>{message}</level>")
+
+    # Downgrade only known transient Telegram polling conflicts to WARNING.
+    # Real errors (auth, network, etc.) stay at ERROR.
+    _TRANSIENT_PATTERNS = ("terminated by other getUpdates", "polling_action_cb")
+
+    class _TelegramConflictDowngrade(logging.Filter):
+        def filter(self, record):
+            if record.levelno >= logging.ERROR:
+                msg = record.getMessage()
+                if any(p in msg for p in _TRANSIENT_PATTERNS):
+                    record.levelno = logging.WARNING
+                    record.levelname = "WARNING"
+            return True
+
+    _flt = _TelegramConflictDowngrade()
+    logging.getLogger("telegram.ext._updater").addFilter(_flt)
+    logging.getLogger("telegram.ext._utils.networkloop").addFilter(_flt)
 
 
 def _create_backend(config):
@@ -465,6 +482,14 @@ def _serve_combined(port: int, verbose: bool):
     channels = ChannelManager(config, bus)
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels: {', '.join(channels.enabled_channels)}")
+
+    # Register Zalo tool if Zalo channel is active
+    zalo_ch = channels.get_channel("zalo")
+    if zalo_ch:
+        from miu_bot.agent.tools.zalo import ZaloTool
+        from miu_bot.channels.zalo import ZaloChannel
+        if isinstance(zalo_ch, ZaloChannel):
+            agent.tools.register(ZaloTool(send_and_wait=zalo_ch.send_and_wait))
 
     async def run():
         import uvicorn
@@ -882,7 +907,15 @@ def gateway(
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
-    
+
+    # Register Zalo tool if Zalo channel is active
+    zalo_ch = channels.get_channel("zalo")
+    if zalo_ch:
+        from miu_bot.agent.tools.zalo import ZaloTool
+        from miu_bot.channels.zalo import ZaloChannel
+        if isinstance(zalo_ch, ZaloChannel):
+            agent.tools.register(ZaloTool(send_and_wait=zalo_ch.send_and_wait))
+
     cron_status = cron.status()
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")

@@ -29,6 +29,7 @@ class ZaloChannel(BaseChannel):
         self._connected = False
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
         self._thread_types: dict[str, int] = {}  # chat_id -> thread_type (1=user, 2=group)
+        self._response_waiters: dict[str, asyncio.Future] = {}  # response_type -> future
 
     async def start(self) -> None:
         """Start the Zalo channel by connecting to the bridge."""
@@ -72,6 +73,27 @@ class ZaloChannel(BaseChannel):
         if self._ws:
             await self._ws.close()
             self._ws = None
+
+    def get_thread_type(self, chat_id: str) -> int:
+        """Get cached thread type for a chat (1=user, 2=group)."""
+        return self._thread_types.get(chat_id, 1)
+
+    async def send_and_wait(self, cmd: dict, expected_type: str) -> dict:
+        """Send a WS command and wait for a matching response type."""
+        if not self._ws or not self._connected:
+            return {"type": "error", "error": "Bridge not connected"}
+
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[dict] = loop.create_future()
+        self._response_waiters[expected_type] = future
+
+        try:
+            await self._ws.send(json.dumps(cmd))
+            return await asyncio.wait_for(future, timeout=10.0)
+        except asyncio.TimeoutError:
+            return {"type": "error", "error": f"Timeout waiting for {expected_type}"}
+        finally:
+            self._response_waiters.pop(expected_type, None)
 
     ZALO_MAX_CHARS = 2000
 
@@ -252,3 +274,14 @@ class ZaloChannel(BaseChannel):
 
         elif msg_type == "error":
             logger.error(f"Zalo bridge error: {data.get('error')}")
+            # Resolve any waiting futures with the error
+            for key, future in list(self._response_waiters.items()):
+                if not future.done():
+                    future.set_result(data)
+                    self._response_waiters.pop(key, None)
+
+        # Route responses to waiters (reminder-created, reminders, reminder-removed)
+        if msg_type in self._response_waiters:
+            future = self._response_waiters.get(msg_type)
+            if future and not future.done():
+                future.set_result(data)

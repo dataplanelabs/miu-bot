@@ -20,6 +20,7 @@ from miu_bot.agent.tools.web import WebSearchTool, WebFetchTool
 from miu_bot.agent.tools.message import MessageTool
 from miu_bot.agent.tools.spawn import SpawnTool
 from miu_bot.agent.tools.cron import CronTool
+from miu_bot.agent.tools.zalo import ZaloTool
 from miu_bot.agent.memory import MemoryStore
 from miu_bot.agent.subagent import SubagentManager
 from miu_bot.session.manager import Session, SessionManager
@@ -173,6 +174,10 @@ class AgentLoop:
         if cron_tool := self.tools.get("cron"):
             if isinstance(cron_tool, CronTool):
                 cron_tool.set_context(channel, chat_id)
+
+        if zalo_tool := self.tools.get("zalo"):
+            if isinstance(zalo_tool, ZaloTool):
+                zalo_tool.set_context(channel, chat_id)
 
     async def _run_agent_loop(
         self, initial_messages: list[dict], channel: str = "",
