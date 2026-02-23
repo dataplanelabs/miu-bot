@@ -384,7 +384,8 @@ class TelegramChannel(BaseChannel):
                 "user_id": user.id,
                 "username": user.username,
                 "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
+                "sender_name": user.first_name or user.username or "",
+                "is_group": message.chat.type != "private",
             }
         )
     
