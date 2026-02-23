@@ -47,7 +47,8 @@ def init_otel(config: "OTelConfig") -> None:
                 config.endpoint
                 if config.protocol == "grpc"
                 else f"{config.endpoint}/v1/traces"
-            )
+            ),
+            insecure=config.protocol == "grpc",
         )
 
         sampler = None
@@ -75,7 +76,8 @@ def init_otel(config: "OTelConfig") -> None:
                 config.endpoint
                 if config.protocol == "grpc"
                 else f"{config.endpoint}/v1/metrics"
-            )
+            ),
+            insecure=config.protocol == "grpc",
         )
         reader = PeriodicExportingMetricReader(
             metric_exporter,
