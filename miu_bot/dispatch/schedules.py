@@ -26,6 +26,7 @@ async def create_daily_consolidation_schedule(
         Schedule,
         ScheduleActionStartWorkflow,
         ScheduleCalendarSpec,
+        ScheduleRange,
         ScheduleSpec,
         ScheduleState,
     )
@@ -45,8 +46,8 @@ async def create_daily_consolidation_schedule(
                 spec=ScheduleSpec(
                     calendars=[
                         ScheduleCalendarSpec(
-                            hour=[2],
-                            minute=[0],
+                            hour=[ScheduleRange(start=2)],
+                            minute=[ScheduleRange(start=0)],
                         )
                     ],
                     jitter=timedelta(minutes=15),
@@ -78,6 +79,7 @@ async def create_weekly_consolidation_schedule(
         Schedule,
         ScheduleActionStartWorkflow,
         ScheduleCalendarSpec,
+        ScheduleRange,
         ScheduleSpec,
         ScheduleState,
     )
@@ -97,9 +99,9 @@ async def create_weekly_consolidation_schedule(
                 spec=ScheduleSpec(
                     calendars=[
                         ScheduleCalendarSpec(
-                            day_of_week=[0],  # Sunday
-                            hour=[3],
-                            minute=[0],
+                            day_of_week=[ScheduleRange(start=0)],
+                            hour=[ScheduleRange(start=3)],
+                            minute=[ScheduleRange(start=0)],
                         )
                     ],
                     jitter=timedelta(minutes=15),
@@ -128,6 +130,7 @@ async def create_monthly_consolidation_schedule(
         Schedule,
         ScheduleActionStartWorkflow,
         ScheduleCalendarSpec,
+        ScheduleRange,
         ScheduleSpec,
         ScheduleState,
     )
@@ -147,9 +150,9 @@ async def create_monthly_consolidation_schedule(
                 spec=ScheduleSpec(
                     calendars=[
                         ScheduleCalendarSpec(
-                            day_of_month=[1],
-                            hour=[4],
-                            minute=[0],
+                            day_of_month=[ScheduleRange(start=1)],
+                            hour=[ScheduleRange(start=4)],
+                            minute=[ScheduleRange(start=0)],
                         )
                     ],
                     jitter=timedelta(minutes=30),
