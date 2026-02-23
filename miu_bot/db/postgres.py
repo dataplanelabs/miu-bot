@@ -9,7 +9,14 @@ from typing import Any
 
 _MUTABLE_COLUMNS = {"name", "identity", "config_overrides", "status"}
 
-from miu_bot.db.backend import Memory, Message, Session, Workspace
+from miu_bot.db.backend import (
+    ConsolidationLogEntry,
+    DailyNote,
+    Memory,
+    Message,
+    Session,
+    Workspace,
+)
 
 try:
     import asyncpg
@@ -152,13 +159,19 @@ class PostgresBackend:
         category: str,
         content: str,
         source_session_id: str | None = None,
+        tier: str = "active",
+        source_type: str | None = None,
+        priority: int = 0,
     ) -> Memory:
         mem_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
         row = await self._pool.fetchrow(
-            """INSERT INTO memories (id, workspace_id, category, content, source_session_id, created_at)
-               VALUES ($1, $2, $3, $4, $5, $6)
+            """INSERT INTO memories (id, workspace_id, category, content, source_session_id,
+                                    tier, source_type, priority, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                RETURNING *""",
-            mem_id, workspace_id, category, content, source_session_id, datetime.now(timezone.utc),
+            mem_id, workspace_id, category, content, source_session_id,
+            tier, source_type, priority, now,
         )
         return self._row_to_memory(row)
 
@@ -193,6 +206,147 @@ class PostgresBackend:
                        VALUES ($1, $2, $3, $4, $5)""",
                     str(uuid.uuid4()), workspace_id, category, content, datetime.now(timezone.utc),
                 )
+
+    # -- Tier-filtered memories --
+
+    async def get_memories_by_tier(
+        self, workspace_id: str, tier: str, limit: int = 50
+    ) -> list[Memory]:
+        rows = await self._pool.fetch(
+            """SELECT * FROM memories
+               WHERE workspace_id = $1 AND tier = $2
+               ORDER BY priority DESC, created_at DESC
+               LIMIT $3""",
+            workspace_id, tier, limit,
+        )
+        return [self._row_to_memory(r) for r in rows]
+
+    # -- Daily notes --
+
+    async def save_daily_note(self, note: DailyNote) -> DailyNote:
+        row = await self._pool.fetchrow(
+            """INSERT INTO daily_notes
+                   (workspace_id, date, summary, key_topics, decisions_made,
+                    action_items, emotional_tone, message_count, consolidated, created_at)
+               VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8, $9, $10)
+               ON CONFLICT (workspace_id, date) DO NOTHING
+               RETURNING *""",
+            note.workspace_id, note.date, note.summary,
+            json.dumps(note.key_topics), json.dumps(note.decisions_made),
+            json.dumps(note.action_items), note.emotional_tone,
+            note.message_count, note.consolidated, datetime.now(timezone.utc),
+        )
+        if row is None:
+            # Already exists — return existing
+            row = await self._pool.fetchrow(
+                "SELECT * FROM daily_notes WHERE workspace_id = $1 AND date = $2",
+                note.workspace_id, note.date,
+            )
+        return self._row_to_daily_note(row)
+
+    async def get_daily_notes(
+        self, workspace_id: str, start_date: datetime, end_date: datetime
+    ) -> list[DailyNote]:
+        rows = await self._pool.fetch(
+            """SELECT * FROM daily_notes
+               WHERE workspace_id = $1 AND date >= $2 AND date < $3
+               ORDER BY date""",
+            workspace_id, start_date.date() if hasattr(start_date, 'date') else start_date,
+            end_date.date() if hasattr(end_date, 'date') else end_date,
+        )
+        return [self._row_to_daily_note(r) for r in rows]
+
+    # -- Consolidation log --
+
+    async def log_consolidation(self, entry: ConsolidationLogEntry) -> None:
+        await self._pool.execute(
+            """INSERT INTO consolidation_log
+                   (workspace_id, type, period_start, period_end, input_count,
+                    output_count, model_used, tokens_used, cost_estimate, status, error, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)""",
+            entry.workspace_id, entry.type, entry.period_start, entry.period_end,
+            entry.input_count, entry.output_count, entry.model_used,
+            entry.tokens_used, entry.cost_estimate, entry.status,
+            entry.error, datetime.now(timezone.utc),
+        )
+
+    # -- Unconsolidated messages (cross-session) --
+
+    async def get_unconsolidated_messages(
+        self, workspace_id: str, since: datetime, until: datetime
+    ) -> list[Message]:
+        rows = await self._pool.fetch(
+            """SELECT m.* FROM messages m
+               JOIN sessions s ON m.session_id = s.id
+               WHERE s.workspace_id = $1
+                 AND m.consolidated = FALSE
+                 AND m.created_at >= $2
+                 AND m.created_at < $3
+               ORDER BY m.created_at""",
+            workspace_id, since, until,
+        )
+        return [self._row_to_message(r) for r in rows]
+
+    # -- Weekly/monthly consolidation --
+
+    async def get_unconsolidated_daily_notes(
+        self, workspace_id: str, start: datetime, end: datetime
+    ) -> list[DailyNote]:
+        rows = await self._pool.fetch(
+            """SELECT * FROM daily_notes
+               WHERE workspace_id = $1
+                 AND date >= $2 AND date < $3
+                 AND consolidated = FALSE
+               ORDER BY date""",
+            workspace_id,
+            start.date() if hasattr(start, "date") and callable(start.date) else start,
+            end.date() if hasattr(end, "date") and callable(end.date) else end,
+        )
+        return [self._row_to_daily_note(r) for r in rows]
+
+    async def mark_daily_notes_consolidated(
+        self, workspace_id: str, note_ids: list[str]
+    ) -> None:
+        await self._pool.execute(
+            """UPDATE daily_notes SET consolidated = TRUE
+               WHERE workspace_id = $1 AND id = ANY($2::uuid[])""",
+            workspace_id, note_ids,
+        )
+
+    async def promote_memory_tier(
+        self, memory_id: str, new_tier: str, source_type: str | None = None
+    ) -> None:
+        if source_type:
+            await self._pool.execute(
+                "UPDATE memories SET tier = $2, source_type = $3 WHERE id = $1",
+                memory_id, new_tier, source_type,
+            )
+        else:
+            await self._pool.execute(
+                "UPDATE memories SET tier = $2 WHERE id = $1",
+                memory_id, new_tier,
+            )
+
+    async def delete_expired_memories(
+        self, workspace_id: str, tier: str, older_than: datetime
+    ) -> int:
+        tag = await self._pool.execute(
+            """DELETE FROM memories
+               WHERE workspace_id = $1 AND tier = $2 AND created_at < $3""",
+            workspace_id, tier, older_than,
+        )
+        return int(tag.split()[-1])
+
+    async def delete_old_daily_notes(
+        self, workspace_id: str, older_than: datetime
+    ) -> int:
+        tag = await self._pool.execute(
+            """DELETE FROM daily_notes
+               WHERE workspace_id = $1 AND date < $2""",
+            workspace_id,
+            older_than.date() if hasattr(older_than, "date") and callable(older_than.date) else older_than,
+        )
+        return int(tag.split()[-1])
 
     # -- Row mappers --
 
@@ -239,5 +393,30 @@ class PostgresBackend:
             id=row["id"], workspace_id=row["workspace_id"],
             category=row["category"], content=row["content"],
             source_session_id=row.get("source_session_id"),
+            created_at=row["created_at"],
+            tier=row.get("tier", "active"),
+            source_type=row.get("source_type"),
+            priority=row.get("priority", 0),
+            expires_at=row.get("expires_at"),
+        )
+
+    @staticmethod
+    def _row_to_daily_note(row: Any) -> DailyNote:
+        topics = row.get("key_topics", [])
+        if isinstance(topics, str):
+            topics = json.loads(topics)
+        decisions = row.get("decisions_made", [])
+        if isinstance(decisions, str):
+            decisions = json.loads(decisions)
+        items = row.get("action_items", [])
+        if isinstance(items, str):
+            items = json.loads(items)
+        return DailyNote(
+            id=str(row["id"]), workspace_id=row["workspace_id"],
+            date=row["date"], summary=row.get("summary"),
+            key_topics=topics or [], decisions_made=decisions or [],
+            action_items=items or [], emotional_tone=row.get("emotional_tone"),
+            message_count=row.get("message_count", 0),
+            consolidated=row.get("consolidated", False),
             created_at=row["created_at"],
         )

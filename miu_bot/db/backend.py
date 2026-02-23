@@ -48,6 +48,42 @@ class Memory:
     content: str
     source_session_id: str | None
     created_at: datetime
+    tier: str = "active"  # active | reference | archive
+    source_type: str | None = None  # conversation | daily_note | weekly_insight | monthly_summary
+    priority: int = 0
+    expires_at: datetime | None = None
+
+
+@dataclass
+class DailyNote:
+    id: str
+    workspace_id: str
+    date: datetime
+    summary: str | None
+    key_topics: list[str]
+    decisions_made: list[str]
+    action_items: list[str]
+    emotional_tone: str | None
+    message_count: int
+    consolidated: bool
+    created_at: datetime
+
+
+@dataclass
+class ConsolidationLogEntry:
+    id: str
+    workspace_id: str
+    type: str  # daily | weekly | monthly
+    period_start: datetime | None
+    period_end: datetime | None
+    input_count: int
+    output_count: int
+    model_used: str | None
+    tokens_used: int | None
+    cost_estimate: float | None
+    status: str  # pending | completed | failed
+    error: str | None
+    created_at: datetime
 
 
 @runtime_checkable
@@ -88,6 +124,9 @@ class MemoryBackend(Protocol):
         category: str,
         content: str,
         source_session_id: str | None = None,
+        tier: str = "active",
+        source_type: str | None = None,
+        priority: int = 0,
     ) -> Memory: ...
     async def get_memories(
         self, workspace_id: str, categories: list[str] | None = None
@@ -95,3 +134,39 @@ class MemoryBackend(Protocol):
     async def replace_memories(
         self, workspace_id: str, category: str, content: str
     ) -> None: ...
+
+    # Tier-filtered memories
+    async def get_memories_by_tier(
+        self, workspace_id: str, tier: str, limit: int = 50
+    ) -> list[Memory]: ...
+
+    # Daily notes
+    async def save_daily_note(self, note: DailyNote) -> DailyNote: ...
+    async def get_daily_notes(
+        self, workspace_id: str, start_date: datetime, end_date: datetime
+    ) -> list[DailyNote]: ...
+
+    # Consolidation log
+    async def log_consolidation(self, entry: ConsolidationLogEntry) -> None: ...
+
+    # Unconsolidated messages (cross-session, by workspace + date range)
+    async def get_unconsolidated_messages(
+        self, workspace_id: str, since: datetime, until: datetime
+    ) -> list[Message]: ...
+
+    # Weekly/monthly consolidation support
+    async def get_unconsolidated_daily_notes(
+        self, workspace_id: str, start: datetime, end: datetime
+    ) -> list[DailyNote]: ...
+    async def mark_daily_notes_consolidated(
+        self, workspace_id: str, note_ids: list[str]
+    ) -> None: ...
+    async def promote_memory_tier(
+        self, memory_id: str, new_tier: str, source_type: str | None = None
+    ) -> None: ...
+    async def delete_expired_memories(
+        self, workspace_id: str, tier: str, older_than: datetime
+    ) -> int: ...
+    async def delete_old_daily_notes(
+        self, workspace_id: str, older_than: datetime
+    ) -> int: ...

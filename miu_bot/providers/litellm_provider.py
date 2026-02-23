@@ -3,12 +3,19 @@
 import json
 import json_repair
 import os
+import time
 from typing import Any
 
 import httpx
 import litellm
 from litellm import acompletion
 from loguru import logger
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_random_exponential,
+    retry_if_exception_type,
+)
 
 from miu_bot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from miu_bot.providers.registry import find_by_model, find_gateway
@@ -102,6 +109,20 @@ class LiteLLMProvider(LLMProvider):
                     kwargs.update(overrides)
                     return
     
+    def _record_metrics(self, model: str, elapsed: float, response: Any) -> None:
+        """Record OTel metrics for an LLM call."""
+        try:
+            from miu_bot.observability.metrics import llm_latency, llm_tokens
+
+            llm_latency.record(elapsed, {"model": model})
+            if response.usage:
+                llm_tokens.add(
+                    response.usage.get("total_tokens", 0),
+                    {"model": model},
+                )
+        except Exception:
+            pass
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -156,10 +177,14 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tool_choice"] = "auto"
         
         try:
-            response = await acompletion(**kwargs)
-            return self._parse_response(response)
+            start = time.monotonic()
+            response = await self._call_with_retry(**kwargs)
+            elapsed = time.monotonic() - start
+            parsed = self._parse_response(response)
+            self._record_metrics(model, elapsed, parsed)
+            return parsed
         except Exception as e:
-            logger.warning(f"LiteLLM failed: {type(e).__name__}: {str(e)[:200]}")
+            logger.warning(f"LiteLLM failed after retries: {type(e).__name__}: {str(e)[:200]}")
             # Fallback: if litellm can't parse the response (e.g. non-standard
             # finish_reason from Z.ai), make a direct httpx call and parse manually.
             if self.api_base and self.api_key:
@@ -175,6 +200,25 @@ class LiteLLMProvider(LLMProvider):
                 finish_reason="error",
             )
     
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_random_exponential(multiplier=1, min=2, max=30),
+        retry=retry_if_exception_type((
+            litellm.RateLimitError,
+            litellm.APIConnectionError,
+            litellm.ServiceUnavailableError,
+            litellm.Timeout,
+        )),
+        reraise=True,
+        before_sleep=lambda retry_state: logger.warning(
+            f"LLM retry {retry_state.attempt_number}/3 "
+            f"after {type(retry_state.outcome.exception()).__name__}"
+        ),
+    )
+    async def _call_with_retry(self, **kwargs: Any) -> Any:
+        """Call acompletion with tenacity retry on transient errors."""
+        return await acompletion(**kwargs)
+
     async def _direct_chat(self, kwargs: dict[str, Any]) -> LLMResponse:
         """Direct HTTP fallback when LiteLLM can't parse the provider's response."""
         url = f"{self.api_base.rstrip('/')}/chat/completions"
@@ -280,6 +324,96 @@ class LiteLLMProvider(LLMProvider):
             reasoning_content=reasoning_content,
         )
     
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ):
+        """Stream chat completion, yielding partial content and tool calls.
+
+        Yields dicts with keys:
+          - {"type": "content", "delta": "text chunk"}
+          - {"type": "tool_calls", "tool_calls": [...]}
+          - {"type": "done", "usage": {...}, "finish_reason": "stop"|"tool_calls"}
+        """
+        model = self._resolve_model(model or self.default_model)
+        max_tokens = max(1, max_tokens)
+
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": True,
+        }
+        self._apply_model_overrides(model, kwargs)
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        if self.extra_headers:
+            kwargs["extra_headers"] = self.extra_headers
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+
+        response = await acompletion(**kwargs)
+        accumulated_tool_calls: dict[int, dict[str, str]] = {}
+        usage: dict[str, int] = {}
+
+        async for chunk in response:
+            choice = chunk.choices[0] if chunk.choices else None
+            if not choice:
+                continue
+
+            delta = choice.delta
+            finish_reason = choice.finish_reason
+
+            if hasattr(delta, "content") and delta.content:
+                yield {"type": "content", "delta": delta.content}
+
+            if hasattr(delta, "tool_calls") and delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in accumulated_tool_calls:
+                        accumulated_tool_calls[idx] = {
+                            "id": "", "name": "", "arguments": ""
+                        }
+                    tc = accumulated_tool_calls[idx]
+                    if tc_delta.id:
+                        tc["id"] = tc_delta.id
+                    if hasattr(tc_delta, "function") and tc_delta.function:
+                        if tc_delta.function.name:
+                            tc["name"] = tc_delta.function.name
+                        if tc_delta.function.arguments:
+                            tc["arguments"] += tc_delta.function.arguments
+
+            if hasattr(chunk, "usage") and chunk.usage:
+                usage = {
+                    "prompt_tokens": getattr(chunk.usage, "prompt_tokens", 0),
+                    "completion_tokens": getattr(chunk.usage, "completion_tokens", 0),
+                    "total_tokens": getattr(chunk.usage, "total_tokens", 0),
+                }
+
+            if finish_reason:
+                if accumulated_tool_calls:
+                    tool_calls_list = []
+                    for tc in accumulated_tool_calls.values():
+                        args = json_repair.loads(tc["arguments"]) if tc["arguments"] else {}
+                        tool_calls_list.append(ToolCallRequest(
+                            id=tc["id"], name=tc["name"], arguments=args,
+                        ))
+                    yield {"type": "tool_calls", "tool_calls": tool_calls_list}
+                yield {
+                    "type": "done",
+                    "usage": usage,
+                    "finish_reason": finish_reason,
+                }
+                return
+
     def get_default_model(self) -> str:
         """Get the default model."""
         return self.default_model

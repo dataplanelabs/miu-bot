@@ -376,7 +376,7 @@ async def _ensure_workspaces(
 
 
 def _serve_combined(port: int, verbose: bool):
-    """Run in combined mode: gateway + agent loop (no Hatchet)."""
+    """Run in combined mode: gateway + agent loop (single process)."""
     from miu_bot.config.loader import load_config, get_data_dir
     from miu_bot.bus.queue import MessageBus
     from miu_bot.agent.loop import AgentLoop
@@ -471,7 +471,7 @@ def _serve_combined(port: int, verbose: bool):
 
 
 def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = None):
-    """Run in gateway mode: channels + Hatchet event dispatch (no AgentLoop)."""
+    """Run in gateway mode: channels + Temporal dispatch (no AgentLoop)."""
     from miu_bot.config.loader import load_config
     from miu_bot.config.bots import load_bots
     from miu_bot.bus.queue import MessageBus
@@ -488,6 +488,11 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
 
     if not bots:
         console.print("[yellow]No bots configured — running empty gateway[/yellow]")
+
+    # Init OTel
+    from miu_bot.observability.setup import init_otel, shutdown_otel
+
+    init_otel(config.otel)
 
     async def run():
         import uvicorn
@@ -524,13 +529,48 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
         )
         server = uvicorn.Server(uvi_config)
 
-        async def dispatch_to_hatchet():
-            """Consume inbound messages and dispatch to Hatchet."""
-            if not config.hatchet.enabled:
-                logger.warning("Hatchet not enabled — gateway dispatch inactive")
-                return
-            from miu_bot.worker.client import create_hatchet_client
-            hatchet = create_hatchet_client(config.hatchet)
+        # Create Temporal consolidation schedules for all workspaces
+        if workspace_map:
+            try:
+                from miu_bot.dispatch.client import create_temporal_client as _tc
+                from miu_bot.dispatch.schedules import (
+                    create_daily_consolidation_schedule,
+                    create_weekly_consolidation_schedule,
+                    create_monthly_consolidation_schedule,
+                )
+
+                _sched_client = await _tc(
+                    config.temporal.server_url, config.temporal.namespace
+                )
+                for _bot_name, _ws_id in workspace_map.items():
+                    await create_daily_consolidation_schedule(
+                        _sched_client, _ws_id,
+                        task_queue=config.temporal.task_queue,
+                    )
+                    await create_weekly_consolidation_schedule(
+                        _sched_client, _ws_id,
+                        task_queue=config.temporal.task_queue,
+                    )
+                    await create_monthly_consolidation_schedule(
+                        _sched_client, _ws_id,
+                        task_queue=config.temporal.task_queue,
+                    )
+                console.print(
+                    f"[green]✓[/green] Consolidation schedules (daily/weekly/monthly): "
+                    f"{len(workspace_map)} workspace(s)"
+                )
+            except Exception as _e:
+                from loguru import logger as _logger
+                _logger.warning(f"Could not create consolidation schedules: {_e}")
+
+        async def dispatch_loop():
+            """Consume inbound messages and dispatch via Temporal."""
+            from miu_bot.dispatch.client import create_temporal_client
+            from miu_bot.dispatch.gateway import dispatch_message
+
+            temporal_client = await create_temporal_client(
+                config.temporal.server_url, config.temporal.namespace
+            )
 
             while True:
                 try:
@@ -538,11 +578,20 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
                         bus.consume_inbound(), timeout=1.0
                     )
 
-                    # Resolve workspace from bot_name (direct lookup)
+                    # Record metric
+                    try:
+                        from miu_bot.observability.metrics import messages_received
+                        messages_received.add(1, {
+                            "channel": msg.channel,
+                            "bot_name": msg.bot_name or "",
+                        })
+                    except Exception:
+                        pass
+
+                    # Resolve workspace
                     if msg.bot_name and msg.bot_name in workspace_map:
                         workspace_id = workspace_map[msg.bot_name]
                     else:
-                        # Fallback: old resolver for backward compat
                         from miu_bot.workspace.resolver import WorkspaceResolver
                         resolver = WorkspaceResolver(backend)
                         workspace_id = await resolver.resolve(
@@ -559,33 +608,35 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
                         workspace_id, msg.channel, msg.chat_id
                     )
 
-                    event_payload = {
-                        "workspace_id": workspace_id,
-                        "session_id": session.id,
-                        "channel": msg.channel,
-                        "chat_id": msg.chat_id,
-                        "sender_id": msg.sender_id,
-                        "content": msg.content,
-                        "metadata": msg.metadata,
-                        "bot_name": msg.bot_name,
-                    }
-                    logger.info(
-                        f"Dispatching to Hatchet: bot={msg.bot_name} "
-                        f"ws={workspace_id[:8]} session={session.id[:8]}"
+                    task_queue = (
+                        f"{msg.bot_name}-tasks"
+                        if msg.bot_name
+                        else config.temporal.task_queue
                     )
-                    hatchet.event.push("message:received", event_payload)
+                    await dispatch_message(
+                        client=temporal_client,
+                        workspace_id=workspace_id,
+                        session_id=session.id,
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        sender_id=msg.sender_id,
+                        content=msg.content,
+                        metadata=msg.metadata,
+                        bot_name=msg.bot_name,
+                        task_queue=task_queue,
+                    )
                 except asyncio.TimeoutError:
                     continue
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    logger.error(f"Hatchet dispatch failed: {e}", exc_info=True)
+                    logger.error(f"Temporal dispatch failed: {e}", exc_info=True)
 
         try:
             await asyncio.gather(
                 bot_mgr.start_all(),
                 server.serve(),
-                dispatch_to_hatchet(),
+                dispatch_loop(),
                 return_exceptions=True,
             )
         finally:
@@ -594,99 +645,75 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
             if pool:
                 from miu_bot.db.pool import close_pool
                 await close_pool(pool)
+            shutdown_otel()
 
     asyncio.run(run())
 
 
-def _serve_worker(verbose: bool):
-    """Run in worker mode: Hatchet workflow processing (no HTTP server)."""
-    from datetime import timedelta
+def _serve_worker(verbose: bool, bot_filter: str | None = None):
+    """Run in worker mode: Temporal workflow processing."""
     from miu_bot.config.loader import load_config
-    from miu_bot.worker.client import create_hatchet_client
-    from loguru import logger
 
     _setup_logging(verbose)
-    console.print(f"{__logo__} Starting miubot serve (worker)...")
-
     config = load_config()
-    if not config.hatchet.enabled and not config.hatchet.token:
-        console.print("[red]Worker mode requires Hatchet configuration[/red]")
-        raise typer.Exit(1)
+    _serve_worker_temporal(config, verbose, bot_filter)
 
-    hatchet = create_hatchet_client(config.hatchet)
 
-    # Lifespan: async resource setup/cleanup (DB pool, provider)
-    async def lifespan():
+def _serve_worker_temporal(config, verbose: bool, bot_filter: str | None = None):
+    """Run Temporal worker with configurable task queues."""
+    from loguru import logger
+
+    console.print(f"{__logo__} Starting miubot serve (worker/temporal)...")
+
+    # Init OTel
+    from miu_bot.observability.setup import init_otel, shutdown_otel
+
+    init_otel(config.otel)
+
+    # Determine task queues
+    task_queues = [config.temporal.task_queue]
+    if bot_filter:
+        task_queues = [f"{b.strip()}-tasks" for b in bot_filter.split(",")]
+    console.print(f"[green]✓[/green] Task queues: {', '.join(task_queues)}")
+
+    async def run():
         from miu_bot.db.pool import create_pool, close_pool
         from miu_bot.db.postgres import PostgresBackend
+        from miu_bot.dispatch.client import create_temporal_client
+        from miu_bot.dispatch.worker import run_temporal_worker, set_activity_deps
 
         pool = await create_pool(
             config.database.url,
             config.database.min_pool_size,
             config.database.max_pool_size,
         )
+        backend = PostgresBackend(pool)
 
-        # Fallback provider config from global config (for bots without overrides)
         p = config.get_provider()
-        yield {
-            "backend": PostgresBackend(pool),
-            "gateway_url": config.hatchet.gateway_url,
+        set_activity_deps({
+            "backend": backend,
+            "pool": pool,
+            "gateway_url": config.dispatch.gateway_url,
             "fallback_model": config.agents.defaults.model,
             "fallback_api_key": p.api_key if p else "",
             "fallback_api_base": config.get_api_base(),
             "max_tokens": config.agents.defaults.max_tokens,
             "temperature": config.agents.defaults.temperature,
             "max_iterations": config.agents.defaults.max_tool_iterations,
-        }
-        await close_pool(pool)
-        logger.info("Connection pool closed")
+        })
 
-    # Define workflows
-    from hatchet_sdk.runnables.types import ConcurrencyExpression, ConcurrencyLimitStrategy
+        client = await create_temporal_client(
+            config.temporal.server_url, config.temporal.namespace
+        )
 
-    process_msg_wf = hatchet.workflow(
-        name="process-message",
-        on_events=["message:received"],
-        concurrency=ConcurrencyExpression(
-            expression="input.session_id",
-            max_runs=1,
-            limit_strategy=ConcurrencyLimitStrategy.GROUP_ROUND_ROBIN,
-        ),
-    )
-
-    @process_msg_wf.task(execution_timeout=timedelta(minutes=5))
-    async def process_message(input, context):
-        from miu_bot.worker.workflows.process_message import ProcessMessageWorkflow
-        deps = context.lifespan
-        input_data = input.model_dump()
-        logger.info(f"Processing message: workspace={input_data.get('workspace_id', '?')[:8]} "
-                     f"bot={input_data.get('bot_name', '?')} channel={input_data.get('channel', '?')}")
         try:
-            wf = ProcessMessageWorkflow(
-                backend=deps["backend"],
-                gateway_url=deps["gateway_url"],
-                fallback_model=deps["fallback_model"],
-                fallback_api_key=deps["fallback_api_key"],
-                fallback_api_base=deps["fallback_api_base"],
-                max_tokens=deps["max_tokens"],
-                temperature=deps["temperature"],
-                max_iterations=deps["max_iterations"],
-            )
-            result = await wf.process(input_data)
-            logger.info(f"Message processed: status={result.get('status', '?')}")
-            return result
-        except Exception as e:
-            logger.error(f"process_message failed: {type(e).__name__}: {e}", exc_info=True)
-            raise
+            await run_temporal_worker(client, task_queues)
+        finally:
+            await close_pool(pool)
+            shutdown_otel()
+            logger.info("Connection pool closed")
 
-    # Start worker (blocking — creates own event loop)
-    worker = hatchet.worker(
-        "miubot-worker",
-        workflows=[process_msg_wf],
-        lifespan=lifespan,
-    )
-    logger.info("Starting Hatchet worker with workflows: [process-message]")
-    worker.start()
+    asyncio.run(run())
 
 
 @app.command()
@@ -694,11 +721,12 @@ def serve(
     role: str = typer.Option("combined", "--role", "-r", help="Role: combined | gateway | worker"),
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
     bots_config: Path = typer.Option(None, "--bots-config", help="Path to bots.yaml"),
+    bot_filter: str = typer.Option(None, "--bot-filter", help="Comma-separated bot names for dedicated worker queues"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the miubot server (combined, gateway, or worker mode)."""
     if role == "worker":
-        _serve_worker(verbose)
+        _serve_worker(verbose, bot_filter=bot_filter)
     elif role == "gateway":
         _serve_gateway(port, verbose, bots_config_path=bots_config)
     else:

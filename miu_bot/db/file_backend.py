@@ -228,6 +228,9 @@ class FileBackend:
         category: str,
         content: str,
         source_session_id: str | None = None,
+        tier: str = "active",
+        source_type: str | None = None,
+        priority: int = 0,
     ) -> Memory:
         mem_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
@@ -286,3 +289,53 @@ class FileBackend:
         })
         kept.append(entry)
         path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+    # -- BASB tier stubs (file backend doesn't support tiered memory) --
+
+    async def get_memories_by_tier(
+        self, workspace_id: str, tier: str, limit: int = 50
+    ) -> list["Memory"]:
+        # File backend treats all memories as active tier
+        all_mems = await self.get_memories(workspace_id)
+        return all_mems[:limit]
+
+    async def save_daily_note(self, note: Any) -> Any:
+        return note  # no-op for file backend
+
+    async def get_daily_notes(
+        self, workspace_id: str, start_date: Any, end_date: Any
+    ) -> list:
+        return []
+
+    async def log_consolidation(self, entry: Any) -> None:
+        pass  # no-op for file backend
+
+    async def get_unconsolidated_messages(
+        self, workspace_id: str, since: Any, until: Any
+    ) -> list["Message"]:
+        return []
+
+    async def get_unconsolidated_daily_notes(
+        self, workspace_id: str, start: Any, end: Any
+    ) -> list:
+        return []
+
+    async def mark_daily_notes_consolidated(
+        self, workspace_id: str, note_ids: list[str]
+    ) -> None:
+        pass
+
+    async def promote_memory_tier(
+        self, memory_id: str, new_tier: str, source_type: str | None = None
+    ) -> None:
+        pass
+
+    async def delete_expired_memories(
+        self, workspace_id: str, tier: str, older_than: Any
+    ) -> int:
+        return 0
+
+    async def delete_old_daily_notes(
+        self, workspace_id: str, older_than: Any
+    ) -> int:
+        return 0

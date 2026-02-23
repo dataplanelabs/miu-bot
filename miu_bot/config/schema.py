@@ -175,6 +175,9 @@ class AgentDefaults(BaseModel):
     temperature: float = 0.7
     max_tool_iterations: int = 20
     memory_window: int = 50
+    retry_max_attempts: int = 3
+    retry_min_wait: float = 2.0  # seconds
+    retry_max_wait: float = 30.0  # seconds
 
 
 class AgentsConfig(BaseModel):
@@ -218,15 +221,36 @@ class BackendConfig(BaseModel):
     type: str = "file"  # "file" or "postgres"
 
 
-class HatchetConfig(BaseModel):
-    """Hatchet task orchestration configuration."""
-    enabled: bool = False
-    api_url: str = "http://localhost:8888"
-    grpc_host: str = ""  # gRPC endpoint (e.g. hatchet-engine.hatchet.svc:7070); empty = read from token
-    tls_strategy: str = ""  # "none" for plaintext gRPC, "tls" for TLS, empty = SDK default (tls)
-    token: str = ""
+class TemporalConfig(BaseModel):
+    """Temporal workflow orchestration configuration."""
+    server_url: str = "localhost:7233"
     namespace: str = "miubot"
-    gateway_url: str = "http://miubot-gateway:18790"  # Internal service URL for worker→gateway calls
+    task_queue: str = "default-tasks"
+
+
+class DispatchConfig(BaseModel):
+    """Dispatch configuration for gateway→worker message routing."""
+    gateway_url: str = "http://miubot-gateway:18790"
+
+
+class OTelConfig(BaseModel):
+    """OpenTelemetry configuration."""
+    enabled: bool = False
+    endpoint: str = "http://localhost:4317"  # OTLP gRPC
+    protocol: str = "grpc"  # "grpc" or "http"
+    service_name: str = "miubot"
+    service_version: str = ""  # auto-detect from package
+    environment: str = "production"
+    sample_rate: float = 1.0  # 0.0 to 1.0
+    export_interval_ms: int = 5000
+
+
+class StreamingConfig(BaseModel):
+    """Streaming response configuration."""
+    enabled: bool = True
+    debounce_interval: float = 1.5  # seconds between message edits
+    thinking_indicator: str = "Thinking..."
+    min_chars_per_update: int = 30  # minimum chars before sending update
 
 
 class GatewayConfig(BaseModel):
@@ -288,8 +312,11 @@ class Config(BaseSettings):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     backend: BackendConfig = Field(default_factory=BackendConfig)
-    hatchet: HatchetConfig = Field(default_factory=HatchetConfig)
-    
+    temporal: TemporalConfig = Field(default_factory=TemporalConfig)
+    dispatch: DispatchConfig = Field(default_factory=DispatchConfig)
+    streaming: StreamingConfig = Field(default_factory=StreamingConfig)
+    otel: OTelConfig = Field(default_factory=OTelConfig)
+
     @property
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""

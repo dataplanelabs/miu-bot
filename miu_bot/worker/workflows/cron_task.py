@@ -13,10 +13,7 @@ if TYPE_CHECKING:
 
 
 class CronTaskWorkflow:
-    """Hatchet workflow for executing cron-triggered tasks.
-
-    Registered with: on_events=["cron:trigger"]
-    """
+    """Workflow for executing cron-triggered tasks."""
 
     def __init__(
         self,

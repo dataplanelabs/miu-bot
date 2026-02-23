@@ -99,10 +99,16 @@ class AgentLoop:
         # Per-session processing: one concurrent task per session key
         self._session_tasks: dict[str, asyncio.Task] = {}
         self._session_queues: dict[str, asyncio.Queue] = {}
-        # Lock for tool context — shared tools have mutable routing state
-        self._tool_context_lock = asyncio.Lock()
+        # Per-session locks for tool context — shared tools have mutable routing state
+        self._session_locks: dict[str, asyncio.Lock] = {}
         self._register_default_tools()
-    
+
+    def _get_session_lock(self, session_key: str) -> asyncio.Lock:
+        """Get or create a per-session lock for tool context."""
+        if session_key not in self._session_locks:
+            self._session_locks[session_key] = asyncio.Lock()
+        return self._session_locks[session_key]
+
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
         # File tools (restrict to workspace if configured)
@@ -169,7 +175,8 @@ class AgentLoop:
                 cron_tool.set_context(channel, chat_id)
 
     async def _run_agent_loop(
-        self, initial_messages: list[dict], channel: str = "", chat_id: str = ""
+        self, initial_messages: list[dict], channel: str = "",
+        chat_id: str = "", session_key: str = "",
     ) -> tuple[str | None, list[str]]:
         """
         Run the agent iteration loop.
@@ -231,8 +238,9 @@ class AgentLoop:
                     reasoning_content=response.reasoning_content,
                 )
 
-                # Lock tool context to prevent race between concurrent sessions
-                async with self._tool_context_lock:
+                # Per-session lock to prevent race on mutable tool routing state
+                lock = self._get_session_lock(session_key or f"{channel}:{chat_id}")
+                async with lock:
                     self._set_tool_context(channel, chat_id)
                     for tool_call in response.tool_calls:
                         tools_used.append(tool_call.name)
@@ -309,40 +317,43 @@ class AgentLoop:
         """Process messages for a single session sequentially."""
         queue = self._session_queues[key]
         idle_timeout = 300  # Clean up worker after 5 min idle
-        while self._running:
-            try:
-                msg = await asyncio.wait_for(queue.get(), timeout=idle_timeout)
-            except asyncio.TimeoutError:
-                logger.debug(f"Session worker '{key}' idle, stopping")
-                break
-            except asyncio.CancelledError:
-                break
-            try:
-                response = await self._process_message(msg)
-                if response:
-                    await self.bus.publish_outbound(response)
-            except asyncio.CancelledError:
-                logger.info(f"Session '{key}' processing cancelled")
-                # Send a cancellation notice so the channel can stop typing indicator
+        try:
+            while self._running:
                 try:
-                    await asyncio.shield(self.bus.publish_outbound(OutboundMessage(
+                    msg = await asyncio.wait_for(queue.get(), timeout=idle_timeout)
+                except asyncio.TimeoutError:
+                    logger.debug(f"Session worker '{key}' idle, stopping")
+                    break
+                except asyncio.CancelledError:
+                    break
+                try:
+                    response = await self._process_message(msg)
+                    if response:
+                        await self.bus.publish_outbound(response)
+                except asyncio.CancelledError:
+                    logger.info(f"Session '{key}' processing cancelled")
+                    try:
+                        await asyncio.shield(self.bus.publish_outbound(OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content="Sorry, my previous processing was interrupted. Please send your message again.",
+                            metadata=msg.metadata or {},
+                        )))
+                    except (Exception, asyncio.CancelledError):
+                        pass
+                    break
+                except Exception as e:
+                    logger.error(f"Error processing message in session '{key}': {e}")
+                    short_error = str(e).split('\n')[0][:200]
+                    await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel,
                         chat_id=msg.chat_id,
-                        content="Sorry, my previous processing was interrupted. Please send your message again.",
+                        content=f"Sorry, I encountered an error: {short_error}",
                         metadata=msg.metadata or {},
-                    )))
-                except (Exception, asyncio.CancelledError):
-                    pass
-                break
-            except Exception as e:
-                logger.error(f"Error processing message in session '{key}': {e}")
-                short_error = str(e).split('\n')[0][:200]
-                await self.bus.publish_outbound(OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=f"Sorry, I encountered an error: {short_error}",
-                    metadata=msg.metadata or {},
-                ))
+                    ))
+        finally:
+            # Clean up per-session lock when worker exits
+            self._session_locks.pop(key, None)
     
     async def close_mcp(self) -> None:
         """Close MCP connections."""
@@ -360,6 +371,7 @@ class AgentLoop:
             task.cancel()
         self._session_tasks.clear()
         self._session_queues.clear()
+        self._session_locks.clear()
         logger.info("Agent loop stopping")
     
     async def _process_multitenant(self, msg: InboundMessage) -> OutboundMessage | None:
@@ -429,7 +441,8 @@ class AgentLoop:
         )
 
         final_content, tools_used = await self._run_agent_loop(
-            initial_messages, channel=msg.channel, chat_id=msg.chat_id
+            initial_messages, channel=msg.channel, chat_id=msg.chat_id,
+            session_key=f"{workspace_id}:{msg.channel}:{msg.chat_id}",
         )
 
         if final_content is None:
@@ -525,12 +538,13 @@ class AgentLoop:
             chat_id=msg.chat_id,
         )
         final_content, tools_used = await self._run_agent_loop(
-            initial_messages, channel=msg.channel, chat_id=msg.chat_id
+            initial_messages, channel=msg.channel, chat_id=msg.chat_id,
+            session_key=key,
         )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
-        
+
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
         
@@ -574,7 +588,8 @@ class AgentLoop:
             chat_id=origin_chat_id,
         )
         final_content, _ = await self._run_agent_loop(
-            initial_messages, channel=origin_channel, chat_id=origin_chat_id
+            initial_messages, channel=origin_channel, chat_id=origin_chat_id,
+            session_key=session_key,
         )
 
         if final_content is None:

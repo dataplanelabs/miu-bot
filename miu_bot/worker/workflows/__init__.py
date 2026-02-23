@@ -1,1 +1,1 @@
-"""Hatchet workflow definitions."""
+"""Workflow definitions for message processing."""

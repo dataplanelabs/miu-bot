@@ -35,8 +35,7 @@ class ConsolidateMemoryWorkflow:
             current_memory = "\n".join(m.content for m in memories)
 
             # NOTE: In a full implementation, we'd query sessions with
-            # unconsolidated message counts > threshold. For now, this
-            # workflow structure is ready for the Hatchet scheduler.
+            # unconsolidated message counts > threshold.
             logger.debug(f"Consolidation check for workspace {ws.name}")
 
         return {"consolidated": total_consolidated}

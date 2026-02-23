@@ -1,4 +1,4 @@
-"""ProcessMessage workflow — main message processing via Hatchet."""
+"""ProcessMessage workflow — main message processing."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 
 class ProcessMessageWorkflow:
-    """Hatchet workflow for processing a single inbound message.
+    """Workflow for processing a single inbound message.
 
     Per-message: creates provider, tools, MCP from workspace.config_overrides.
     """
@@ -87,10 +87,14 @@ class ProcessMessageWorkflow:
 
             # Load context
             messages = await self.backend.get_messages(session_id, limit=50)
-            memories = await self.backend.get_memories(workspace_id)
+
+            # Use tier-based context assembly (BASB)
+            from miu_bot.memory.context_assembly import assemble_memory_context
 
             identity = parse_identity(augmented_identity)
-            memories_text = "\n".join(m.content for m in memories)
+            memories_text = await assemble_memory_context(
+                self.backend, workspace_id, query=content
+            )
             history = [{"role": m.role, "content": m.content} for m in messages]
 
             context_builder = ContextBuilder(workspace=None)

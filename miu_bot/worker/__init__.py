@@ -1,1 +1,1 @@
-"""Hatchet worker module for distributed message processing."""
+"""Worker module for distributed message processing."""

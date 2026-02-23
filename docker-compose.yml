@@ -15,15 +15,34 @@ services:
       timeout: 3s
       retries: 5
 
-  hatchet:
-    image: ghcr.io/hatchet-dev/hatchet/hatchet-lite:latest
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "8888:8888"
+  temporal-db:
+    image: postgres:16-alpine
     environment:
-      DATABASE_URL: postgresql://miubot:miubot@postgres:5432/miubot
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    volumes:
+      - temporal-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  temporal:
+    image: temporalio/auto-setup:latest
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    environment:
+      DB: postgresql
+      POSTGRES_SEEDS: temporal-db
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+      DB_PORT: 5432
+    depends_on:
+      temporal-db:
+        condition: service_healthy
 
   migrate:
     build: .
@@ -37,10 +56,12 @@ services:
 
   gateway:
     build: .
-    command: miubot serve --role combined
+    command: miubot serve --role gateway
     depends_on:
       postgres:
         condition: service_healthy
+      temporal:
+        condition: service_started
       migrate:
         condition: service_completed_successfully
     ports:
@@ -49,6 +70,7 @@ services:
     environment:
       MIU_BOT_DATABASE__URL: postgresql://miubot:miubot@postgres:5432/miubot
       MIU_BOT_BACKEND__TYPE: postgres
+      MIU_BOT_TEMPORAL__SERVER_URL: temporal:7233
 
   worker:
     build: .
@@ -56,7 +78,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      hatchet:
+      temporal:
         condition: service_started
       migrate:
         condition: service_completed_successfully
@@ -66,7 +88,9 @@ services:
     environment:
       MIU_BOT_DATABASE__URL: postgresql://miubot:miubot@postgres:5432/miubot
       MIU_BOT_BACKEND__TYPE: postgres
-      MIU_BOT_HATCHET__API_URL: http://hatchet:8888
+      MIU_BOT_DISPATCH__GATEWAY_URL: http://gateway:18790
+      MIU_BOT_TEMPORAL__SERVER_URL: temporal:7233
 
 volumes:
   pgdata:
+  temporal-pgdata:

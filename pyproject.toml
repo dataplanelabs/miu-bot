@@ -40,6 +40,7 @@ dependencies = [
     "prompt-toolkit>=3.0.0",
     "mcp>=1.0.0",
     "json-repair>=0.30.0",
+    "tenacity>=8.2.0",
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.25.0",
     "pyyaml>=6.0.0",
@@ -53,7 +54,11 @@ postgres = [
     "alembic>=1.13.0",
     "sqlalchemy>=2.0.0",
 ]
-hatchet = ["hatchet-sdk>=0.59.0"]
+temporal = ["temporalio>=1.7.0"]
+otel = [
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp>=1.20.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
