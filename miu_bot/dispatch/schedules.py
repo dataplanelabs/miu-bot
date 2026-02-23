@@ -219,7 +219,7 @@ async def ensure_job_schedules(
             spec=ScheduleSpec(
                 cron_expressions=[job.schedule],
                 jitter=timedelta(minutes=2),
-                timezone_name=job.timezone or "UTC",
+                time_zone_name=job.timezone or "UTC",
             ),
             policy=SchedulePolicy(
                 overlap=ScheduleOverlapPolicy.SKIP,
