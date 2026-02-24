@@ -25,3 +25,4 @@ botpy.log
 tests/
 plans/
 .temp/
+.mcp.json
