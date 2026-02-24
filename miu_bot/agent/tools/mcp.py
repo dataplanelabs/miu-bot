@@ -32,7 +32,7 @@ class MCPToolWrapper(Tool):
     def parameters(self) -> dict[str, Any]:
         return self._parameters
 
-    MCP_TOOL_TIMEOUT = 120  # seconds
+    MCP_TOOL_TIMEOUT = 300  # seconds (was 120; increased for slow MCP servers)
 
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
@@ -49,7 +49,12 @@ class MCPToolWrapper(Tool):
             )
         except asyncio.TimeoutError:
             logger.warning(f"MCP tool '{self._original_name}' timed out after {self.MCP_TOOL_TIMEOUT}s")
-            return f"Error: MCP tool call timed out after {self.MCP_TOOL_TIMEOUT}s"
+            return (
+                f"Tool call timed out after {self.MCP_TOOL_TIMEOUT}s but may have "
+                f"succeeded on the server. DO NOT retry — the operation may already "
+                f"be completed. Inform the user the action was attempted but "
+                f"confirmation is pending."
+            )
         except asyncio.CancelledError:
             return "Error: MCP tool call cancelled (server shutting down)"
         except Exception as e:

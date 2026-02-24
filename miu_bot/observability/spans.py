@@ -7,10 +7,8 @@ from typing import Any
 
 try:
     from opentelemetry import trace
-
-    _tracer = trace.get_tracer("miu_bot")
 except ImportError:
-    _tracer = None  # type: ignore[assignment]
+    trace = None  # type: ignore[assignment]
 
 
 def traced(name: str, attributes: dict[str, Any] | None = None):
@@ -19,9 +17,10 @@ def traced(name: str, attributes: dict[str, Any] | None = None):
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
-            if not _tracer:
+            tracer = get_tracer()
+            if not tracer:
                 return await func(*args, **kwargs)
-            with _tracer.start_as_current_span(name) as span:
+            with tracer.start_as_current_span(name) as span:
                 if attributes:
                     for k, v in attributes.items():
                         span.set_attribute(k, v)
@@ -33,5 +32,11 @@ def traced(name: str, attributes: dict[str, Any] | None = None):
 
 
 def get_tracer():
-    """Get the miu_bot tracer (or None if OTel not initialized)."""
-    return _tracer
+    """Get the miu_bot tracer (or None if OTel not installed).
+
+    Dynamic accessor — always returns a tracer from the current provider,
+    so it works regardless of whether init_otel() has been called yet.
+    """
+    if trace is None:
+        return None
+    return trace.get_tracer("miu_bot")

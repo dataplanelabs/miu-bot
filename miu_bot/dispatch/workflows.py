@@ -28,6 +28,8 @@ class BotSessionWorkflow:
             "content": "",
             "is_done": True,
         }
+        self._current_trace: list[dict[str, Any]] = []
+        self._processing_state: dict[str, Any] = {}
 
     @workflow.signal
     async def new_message(self, msg: dict[str, Any]) -> None:
@@ -39,6 +41,16 @@ class BotSessionWorkflow:
         """Query: current streaming state for gateway polling (Phase 6)."""
         return self._streaming_state
 
+    @workflow.query
+    def get_current_trace(self) -> list[dict[str, Any]]:
+        """Query: accumulated trace events for current/last message."""
+        return self._current_trace
+
+    @workflow.query
+    def get_processing_state(self) -> dict[str, Any]:
+        """Query: current processing metadata (model, tools, timing)."""
+        return self._processing_state
+
     @workflow.run
     async def run(self, session_info: dict[str, Any]) -> None:
         """Main workflow loop — waits for signals, dispatches activities."""
@@ -49,17 +61,27 @@ class BotSessionWorkflow:
             msg = self._pending_messages.pop(0)
 
             try:
-                await workflow.execute_activity(
+                result = await workflow.execute_activity(
                     "process_message_activity",
                     args=[msg, session_info],
-                    start_to_close_timeout=timedelta(minutes=5),
-                    heartbeat_timeout=timedelta(seconds=60),
+                    start_to_close_timeout=timedelta(minutes=10),
+                    heartbeat_timeout=timedelta(seconds=120),
                     retry_policy=RetryPolicy(
                         initial_interval=timedelta(seconds=2),
                         maximum_interval=timedelta(seconds=30),
                         maximum_attempts=3,
                     ),
                 )
+                # Store trace from activity result for query inspection
+                if isinstance(result, dict):
+                    self._current_trace = result.get("trace", [])
+                    self._processing_state = {
+                        "status": result.get("status"),
+                        "bot": result.get("bot"),
+                        "model": result.get("model"),
+                        "tools_used": result.get("tools_used", []),
+                        "total_s": result.get("total_s"),
+                    }
             except ActivityError:
                 logger.error(
                     f"Message processing failed after retries, "

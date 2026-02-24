@@ -15,6 +15,27 @@ if TYPE_CHECKING:
     from miu_bot.providers.base import LLMProvider
     from miu_bot.agent.tools.registry import ToolRegistry
 
+MAX_SAME_TOOL_CALLS = 3
+_SIDE_EFFECT_PREFIXES = (
+    "create_", "update_", "delete_", "send_", "post_",
+    "link_", "set_", "remove_", "add_", "unlink_",
+)
+
+
+def _is_side_effect_tool(name: str) -> bool:
+    """Check if a tool name suggests side-effect (write) operations.
+
+    Uses prefix matching on the action verb (after stripping MCP namespace).
+    E.g. 'mcp_huly_create_issue' → checks 'create_issue'.
+    """
+    lower = name.lower()
+    # Strip common MCP prefixes: mcp_{server}_{action}
+    if lower.startswith("mcp_"):
+        parts = lower.split("_", 2)
+        if len(parts) >= 3:
+            lower = parts[2]  # action part after mcp_{server}_
+    return any(lower.startswith(p) for p in _SIDE_EFFECT_PREFIXES)
+
 
 async def run_agent_loop(
     provider: "LLMProvider",
@@ -36,6 +57,8 @@ async def run_agent_loop(
     tools_used: list[str] = []
     trace: list[dict[str, Any]] = []
     tracer = get_tracer()
+    tool_call_counts: dict[str, int] = {}
+    executed_side_effects: dict[str, str] = {}  # call_key → cached result
 
     while iteration < max_iterations:
         iteration += 1
@@ -84,7 +107,17 @@ async def run_agent_loop(
         trace.append(llm_event)
 
         if on_heartbeat:
-            on_heartbeat({"phase": "llm_done", "iteration": iteration, "latency_s": llm_elapsed})
+            hb: dict[str, Any] = {
+                "phase": "llm_done",
+                "iteration": iteration,
+                "model": model,
+                "latency_s": llm_elapsed,
+            }
+            if response.reasoning_content:
+                hb["reasoning_preview"] = response.reasoning_content[:200]
+            if llm_event.get("usage"):
+                hb["usage"] = llm_event["usage"]
+            on_heartbeat(hb)
 
         if response.has_tool_calls:
             tool_call_dicts = [
@@ -104,47 +137,94 @@ async def run_agent_loop(
             for tool_call in response.tool_calls:
                 tools_used.append(tool_call.name)
                 logger.info(f"Tool call: {tool_call.name}")
-                t0 = time.monotonic()
-                tool_span = tracer.start_span(
-                    f"tool.{tool_call.name}",
-                    attributes={"miubot.tool": tool_call.name},
-                ) if tracer else None
-                try:
-                    result = await tools.execute(tool_call.name, tool_call.arguments)
-                    elapsed = round(time.monotonic() - t0, 2)
-                    _record_tool_latency(tool_call.name, elapsed)
-                    if tool_span:
-                        tool_span.set_attribute("miubot.tool.latency_s", elapsed)
+
+                # Dedup key for side-effect tools (name + sorted args JSON)
+                args_json = json.dumps(tool_call.arguments, sort_keys=True, ensure_ascii=False)
+                call_key = f"{tool_call.name}:{args_json}"
+                count = tool_call_counts.get(tool_call.name, 0)
+
+                if count >= MAX_SAME_TOOL_CALLS:
+                    # Per-tool call cap reached
+                    result = (
+                        f"Tool '{tool_call.name}' called {count} times already. "
+                        f"Limit reached — do not retry."
+                    )
+                    elapsed = 0.0
                     tool_event = {
-                        "event": "tool_call",
+                        "event": "tool_call", "iteration": iteration,
+                        "tool": tool_call.name, "latency_s": 0, "status": "capped",
+                    }
+                    logger.warning(f"Tool '{tool_call.name}' capped at {MAX_SAME_TOOL_CALLS} calls")
+                elif _is_side_effect_tool(tool_call.name) and call_key in executed_side_effects:
+                    # Duplicate side-effect call
+                    cached = executed_side_effects[call_key]
+                    result = (
+                        f"Already executed with same arguments. "
+                        f"Previous result: {cached[:500]}"
+                    )
+                    elapsed = 0.0
+                    tool_event = {
+                        "event": "tool_call", "iteration": iteration,
+                        "tool": tool_call.name, "latency_s": 0, "status": "dedup",
+                    }
+                    logger.info(f"Dedup hit for '{tool_call.name}'")
+                else:
+                    # Normal execution
+                    t0 = time.monotonic()
+                    tool_span = tracer.start_span(
+                        f"tool.{tool_call.name}",
+                        attributes={"miubot.tool": tool_call.name},
+                    ) if tracer else None
+                    try:
+                        result = await tools.execute(tool_call.name, tool_call.arguments)
+                        elapsed = round(time.monotonic() - t0, 2)
+                        _record_tool_latency(tool_call.name, elapsed)
+                        if tool_span:
+                            tool_span.set_attribute("miubot.tool.latency_s", elapsed)
+                        tool_event = {
+                            "event": "tool_call",
+                            "iteration": iteration,
+                            "tool": tool_call.name,
+                            "args_preview": json.dumps(tool_call.arguments, ensure_ascii=False)[:200],
+                            "result_preview": (result or "")[:200],
+                            "latency_s": elapsed,
+                            "status": "ok",
+                        }
+                    except Exception as e:
+                        elapsed = round(time.monotonic() - t0, 2)
+                        logger.warning(f"Tool '{tool_call.name}' failed: {e}")
+                        result = f"Error: tool execution failed: {e}"
+                        if tool_span:
+                            tool_span.set_attribute("error", True)
+                            tool_span.set_attribute("miubot.tool.error", str(e)[:200])
+                        tool_event = {
+                            "event": "tool_call",
+                            "iteration": iteration,
+                            "tool": tool_call.name,
+                            "latency_s": elapsed,
+                            "status": "error",
+                            "error": str(e)[:200],
+                        }
+                    finally:
+                        if tool_span:
+                            tool_span.end()
+                    # Cache side-effect results for dedup
+                    if _is_side_effect_tool(tool_call.name):
+                        executed_side_effects[call_key] = result or ""
+
+                # Always increment call count (capped/dedup/normal)
+                tool_call_counts[tool_call.name] = count + 1
+                trace.append(tool_event)
+                if on_heartbeat:
+                    on_heartbeat({
+                        "phase": "tool_done",
                         "iteration": iteration,
                         "tool": tool_call.name,
                         "args_preview": json.dumps(tool_call.arguments, ensure_ascii=False)[:200],
                         "result_preview": (result or "")[:200],
                         "latency_s": elapsed,
-                        "status": "ok",
-                    }
-                except Exception as e:
-                    elapsed = round(time.monotonic() - t0, 2)
-                    logger.warning(f"Tool '{tool_call.name}' failed: {e}")
-                    result = f"Error: tool execution failed: {e}"
-                    if tool_span:
-                        tool_span.set_attribute("error", True)
-                        tool_span.set_attribute("miubot.tool.error", str(e)[:200])
-                    tool_event = {
-                        "event": "tool_call",
-                        "iteration": iteration,
-                        "tool": tool_call.name,
-                        "latency_s": elapsed,
-                        "status": "error",
-                        "error": str(e)[:200],
-                    }
-                finally:
-                    if tool_span:
-                        tool_span.end()
-                trace.append(tool_event)
-                if on_heartbeat:
-                    on_heartbeat({"phase": "tool_done", "tool": tool_call.name, "latency_s": elapsed})
+                        "status": tool_event.get("status", "ok"),
+                    })
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
