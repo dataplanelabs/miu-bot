@@ -457,7 +457,7 @@ class AgentLoop:
         initial_messages = self.context.build_workspace_messages(
             identity=identity, memories=memories_text, history=history,
             current_message=current_message, channel=msg.channel, chat_id=msg.chat_id,
-            media=msg.media if msg.media else None,
+            media=msg.media if msg.media else None, is_group=is_group,
         )
 
         # Inject tool system hints into the system prompt
@@ -603,6 +603,7 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
+            is_group=is_group,
         )
         final_content, tools_used, _, _ = await self._run_agent_loop(
             initial_messages, channel=msg.channel, chat_id=msg.chat_id,

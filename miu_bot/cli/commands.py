@@ -692,6 +692,14 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
                         workspace_id, msg.channel, msg.chat_id
                     )
 
+                    # Observe-only: save to session history for context but don't dispatch
+                    if msg.observe_only:
+                        sender_name = (msg.metadata or {}).get("sender_name", msg.sender_id)
+                        annotated = f"[{sender_name} (userId: {msg.sender_id})]: {msg.content}"
+                        await backend.save_message(session.id, "user", annotated, msg.metadata)
+                        logger.debug(f"Observed message from {sender_name} in session {session.id[:8]}")
+                        continue
+
                     task_queue = config.temporal.task_queue
                     await dispatch_message(
                         client=temporal_client,

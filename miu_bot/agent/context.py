@@ -37,8 +37,19 @@ _TELEGRAM_FORMATTING_RULES = (
     "\n- No character limit, but prefer concise answers."
 )
 
+_GROUP_CHAT_RULES = (
+    "\n\nGROUP CHAT RULES (MANDATORY):"
+    "\n- This is a GROUP conversation with multiple participants."
+    "\n- Messages are prefixed with [SenderName (userId: ID)] to identify the sender."
+    "\n- ALWAYS address the person who sent the message or @mentioned you, NOT a default user."
+    "\n- Use their name when responding. Do NOT assume everyone is the same person."
+    "\n- Pay attention to sender names in the conversation history to distinguish participants."
+)
 
-def _append_session_info(prompt: str, channel: str | None, chat_id: str | None) -> str:
+
+def _append_session_info(
+    prompt: str, channel: str | None, chat_id: str | None, is_group: bool = False,
+) -> str:
     """Append channel/session info to prompt (shared by all build methods)."""
     if not channel or not chat_id:
         return prompt
@@ -47,6 +58,8 @@ def _append_session_info(prompt: str, channel: str | None, chat_id: str | None) 
         session_info += _ZALO_FORMATTING_RULES
     elif channel == "telegram":
         session_info += _TELEGRAM_FORMATTING_RULES
+    if is_group:
+        session_info += _GROUP_CHAT_RULES
     return prompt + session_info
 
 
@@ -170,6 +183,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         channel: str | None = None,
         chat_id: str | None = None,
         media: list[str] | None = None,
+        is_group: bool = False,
     ) -> list[dict[str, Any]]:
         """Build messages using workspace identity instead of bootstrap files."""
         from miu_bot.workspace.identity import render_system_prompt
@@ -182,7 +196,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
         prompt += f"\n\n## Runtime\nTime: {now} ({tz})\n{runtime}"
-        prompt = _append_session_info(prompt, channel, chat_id)
+        prompt = _append_session_info(prompt, channel, chat_id, is_group=is_group)
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": prompt}]
         messages.extend(history)
@@ -198,6 +212,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         channel: str | None = None,
         chat_id: str | None = None,
         media: list[str] | None = None,
+        is_group: bool = False,
     ) -> list[dict[str, Any]]:
         """Build messages using a pre-composed prompt string."""
         from datetime import datetime
@@ -207,7 +222,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
         prompt += f"\n\n## Runtime\nTime: {now} ({tz})\n{runtime}"
-        prompt = _append_session_info(prompt, channel, chat_id)
+        prompt = _append_session_info(prompt, channel, chat_id, is_group=is_group)
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": prompt}]
         messages.extend(history)
@@ -223,6 +238,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        is_group: bool = False,
     ) -> list[dict[str, Any]]:
         """
         Build the complete message list for an LLM call.
@@ -234,6 +250,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
             media: Optional list of local file paths for images/media.
             channel: Current channel (telegram, feishu, etc.).
             chat_id: Current chat/user ID.
+            is_group: Whether this is a group chat.
 
         Returns:
             List of messages including system prompt.
@@ -242,7 +259,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
 
         # System prompt
         system_prompt = self.build_system_prompt(skill_names)
-        system_prompt = _append_session_info(system_prompt, channel, chat_id)
+        system_prompt = _append_session_info(system_prompt, channel, chat_id, is_group=is_group)
         messages.append({"role": "system", "content": system_prompt})
 
         # History

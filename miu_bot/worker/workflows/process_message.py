@@ -216,6 +216,7 @@ class ProcessMessageWorkflow:
             llm_messages = context_builder.build_workspace_messages_from_prompt(
                 prompt=full_prompt, history=history,
                 current_message=current_message, channel=channel, chat_id=chat_id,
+                is_group=metadata.get("is_group", False),
             )
 
             # Run agent loop with heartbeat reporting
