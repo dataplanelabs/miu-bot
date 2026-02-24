@@ -1,81 +1,43 @@
 <div align="center">
-  <img src="miu_bot_logo.png" alt="miu-bot" width="500">
-  <h1>miu-bot: Ultra-Lightweight Personal AI Assistant</h1>
+  <img src="assets/logo.svg" alt="miu-bot" width="420">
+  <p><strong>Lightweight personal AI assistant framework</strong></p>
   <p>
     <a href="https://pypi.org/project/miu-bot/"><img src="https://img.shields.io/pypi/v/miu-bot" alt="PyPI"></a>
-    <a href="https://pepy.tech/project/miu-bot"><img src="https://static.pepy.tech/badge/miu-bot" alt="Downloads"></a>
-    <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
+    <img src="https://img.shields.io/badge/python-%E2%89%A53.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-    <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/Feishu-Group-E9DBFC?style=flat&logo=feishu&logoColor=white" alt="Feishu"></a>
-    <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/WeChat-Group-C5EAB4?style=flat&logo=wechat&logoColor=white" alt="WeChat"></a>
-    <a href="https://discord.gg/MnCvHqpUGB"><img src="https://img.shields.io/badge/Discord-Community-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
   </p>
 </div>
 
-🐈 **miu-bot** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw) 
+## Overview
 
-⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
+**miu-bot** is a lightweight, async-first AI assistant framework built with Python 3.11+. It supports multi-tenant deployments, 10 chat platforms, 13+ LLM providers, durable workflows via Temporal, and extensible tooling via MCP.
 
-📏 Real-time line count: **3,663 lines** (run `bash core_agent_lines.sh` to verify anytime)
+**Key highlights:**
 
-## 📢 News
+- **Multi-tenant** — Workspaces, Postgres backend, per-bot identities/providers/skills
+- **Three deployment modes** — Combined (dev), Gateway (routing), Worker (processing)
+- **10 chat channels** — Telegram, Discord, WhatsApp, Feishu, DingTalk, Slack, Email, QQ, Zalo, Mochat
+- **13+ LLM providers** — OpenRouter, Anthropic, OpenAI, DeepSeek, Groq, Gemini, and more
+- **Durable workflows** — Temporal-based orchestration with per-session state
+- **MCP support** — Connect external tool servers (stdio + HTTP)
+- **3-tier memory** — Active/Reference/Archive with daily/weekly/monthly consolidation
+- **Observability** — OpenTelemetry tracing, metrics, and cost tracking
 
-- **2026-02-14** 🔌 miu-bot now supports MCP! See [MCP section](#mcp-model-context-protocol) for details.
-- **2026-02-13** 🎉 Released v0.1.3.post7 — includes security hardening and multiple improvements. All users are recommended to upgrade to the latest version. See [release notes](https://github.com/dataplanelabs/miu-bot/releases/tag/v0.1.3.post7) for more details.
-- **2026-02-12** 🧠 Redesigned memory system — Less code, more reliable. Join the [discussion](https://github.com/dataplanelabs/miu-bot/discussions/566) about it!
-- **2026-02-11** ✨ Enhanced CLI experience and added MiniMax support!
-- **2026-02-10** 🎉 Released v0.1.3.post6 with improvements! Check the updates [notes](https://github.com/dataplanelabs/miu-bot/releases/tag/v0.1.3.post6) and our [roadmap](https://github.com/dataplanelabs/miu-bot/discussions/431).
-- **2026-02-09** 💬 Added Slack, Email, and QQ support — miu-bot now supports multiple chat platforms!
-- **2026-02-08** 🔧 Refactored Providers—adding a new LLM provider now takes just 2 simple steps! Check [here](#providers).
-- **2026-02-07** 🚀 Released v0.1.3.post5 with Qwen support & several key improvements! Check [here](https://github.com/dataplanelabs/miu-bot/releases/tag/v0.1.3.post5) for details.
-- **2026-02-06** ✨ Added Moonshot/Kimi provider, Discord integration, and enhanced security hardening!
-- **2026-02-05** ✨ Added Feishu channel, DeepSeek provider, and enhanced scheduled tasks support!
-- **2026-02-04** 🚀 Released v0.1.3.post4 with multi-provider & Docker support! Check [here](https://github.com/dataplanelabs/miu-bot/releases/tag/v0.1.3.post4) for details.
-- **2026-02-03** ⚡ Integrated vLLM for local LLM support and improved natural language task scheduling!
-- **2026-02-02** 🎉 miu-bot officially launched! Welcome to try 🐈 miu-bot!
+## Install
 
-## Key Features of miu-bot:
+**From PyPI** (stable)
 
-🪶 **Ultra-Lightweight**: Just ~4,000 lines of core agent code — 99% smaller than Clawdbot.
+```bash
+pip install miu-bot
+```
 
-🔬 **Research-Ready**: Clean, readable code that's easy to understand, modify, and extend for research.
+**With [uv](https://github.com/astral-sh/uv)** (fast)
 
-⚡️ **Lightning Fast**: Minimal footprint means faster startup, lower resource usage, and quicker iterations.
+```bash
+uv tool install miu-bot
+```
 
-💎 **Easy-to-Use**: One-click to deploy and you're ready to go.
-
-## 🏗️ Architecture
-
-<p align="center">
-  <img src="miu_bot_arch.png" alt="miu-bot architecture" width="800">
-</p>
-
-## ✨ Features
-
-<table align="center">
-  <tr align="center">
-    <th><p align="center">📈 24/7 Real-Time Market Analysis</p></th>
-    <th><p align="center">🚀 Full-Stack Software Engineer</p></th>
-    <th><p align="center">📅 Smart Daily Routine Manager</p></th>
-    <th><p align="center">📚 Personal Knowledge Assistant</p></th>
-  </tr>
-  <tr>
-    <td align="center"><p align="center"><img src="case/search.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/code.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/scedule.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/memory.gif" width="180" height="400"></p></td>
-  </tr>
-  <tr>
-    <td align="center">Discovery • Insights • Trends</td>
-    <td align="center">Develop • Deploy • Scale</td>
-    <td align="center">Schedule • Automate • Organize</td>
-    <td align="center">Learn • Memory • Reasoning</td>
-  </tr>
-</table>
-
-## 📦 Install
-
-**Install from source** (latest features, recommended for development)
+**From source** (latest)
 
 ```bash
 git clone https://github.com/dataplanelabs/miu-bot.git
@@ -83,51 +45,29 @@ cd miu-bot
 pip install -e .
 ```
 
-**Install with [uv](https://github.com/astral-sh/uv)** (stable, fast)
-
-```bash
-uv tool install miu-bot
-```
-
-**Install from PyPI** (stable)
-
-```bash
-pip install miu-bot
-```
-
-## 🚀 Quick Start
+## Quick Start
 
 > [!TIP]
-> Set your API key in `~/.miu-bot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (recommended) or any [supported provider](#providers).
 
 **1. Initialize**
 
 ```bash
-miu-bot onboard
+miubot onboard
 ```
 
 **2. Configure** (`~/.miu-bot/config.json`)
 
-Add or merge these **two parts** into your config (other options have defaults).
-
-*Set your API key* (e.g. OpenRouter, recommended for global users):
 ```json
 {
   "providers": {
     "openrouter": {
       "apiKey": "sk-or-v1-xxx"
     }
-  }
-}
-```
-
-*Set your model*:
-```json
-{
+  },
   "agents": {
     "defaults": {
-      "model": "anthropic/claude-opus-4-5"
+      "model": "anthropic/claude-sonnet-4-5-20250929"
     }
   }
 }
@@ -136,34 +76,30 @@ Add or merge these **two parts** into your config (other options have defaults).
 **3. Chat**
 
 ```bash
-miu-bot agent
+miubot agent
 ```
 
-That's it! You have a working AI assistant in 2 minutes.
+## Chat Channels
 
-## 💬 Chat Apps
+Connect miu-bot to your favorite chat platform:
 
-Talk to your miu-bot through Telegram, Discord, WhatsApp, Feishu, Mochat, DingTalk, Slack, Email, or QQ — anytime, anywhere.
-
-| Channel | Setup |
-|---------|-------|
-| **Telegram** | Easy (just a token) |
-| **Discord** | Easy (bot token + intents) |
-| **WhatsApp** | Medium (scan QR) |
-| **Feishu** | Medium (app credentials) |
-| **Mochat** | Medium (claw token + websocket) |
-| **DingTalk** | Medium (app credentials) |
-| **Slack** | Medium (bot + app tokens) |
-| **Email** | Medium (IMAP/SMTP credentials) |
-| **QQ** | Easy (app credentials) |
+| Channel | Transport | Public IP |
+|---------|-----------|-----------|
+| **Telegram** | Long polling | No |
+| **Discord** | WebSocket gateway | No |
+| **WhatsApp** | Node.js bridge (WebSocket) | No |
+| **Feishu** | WebSocket long connection | No |
+| **Mochat** | Socket.IO + msgpack | No |
+| **DingTalk** | Stream mode | No |
+| **Slack** | Socket mode | No |
+| **Email** | IMAP polling + SMTP | No |
+| **QQ** | botpy SDK (WebSocket) | No |
+| **Zalo** | ZCA-CLI WebSocket bridge | No |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
 
-**1. Create a bot**
-- Open Telegram, search `@BotFather`
-- Send `/newbot`, follow prompts
-- Copy the token
+**1. Create a bot** — Open Telegram, search `@BotFather`, send `/newbot`, copy the token.
 
 **2. Configure**
 
@@ -179,92 +115,20 @@ Talk to your miu-bot through Telegram, Discord, WhatsApp, Feishu, Mochat, DingTa
 }
 ```
 
-> You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`.
-> Copy this value **without the `@` symbol** and paste it into the config file.
-
-
 **3. Run**
 
 ```bash
-miu-bot gateway
+miubot gateway
 ```
-
-</details>
-
-<details>
-<summary><b>Mochat (Claw IM)</b></summary>
-
-Uses **Socket.IO WebSocket** by default, with HTTP polling fallback.
-
-**1. Ask miu-bot to set up Mochat for you**
-
-Simply send this message to miu-bot (replace `xxx@xxx` with your real email):
-
-```
-Read https://raw.githubusercontent.com/HKUDS/MoChat/refs/heads/main/skills/miu-bot/skill.md and register on MoChat. My Email account is xxx@xxx Bind me as your owner and DM me on MoChat.
-```
-
-miu-bot will automatically register, configure `~/.miu-bot/config.json`, and connect to Mochat.
-
-**2. Restart gateway**
-
-```bash
-miu-bot gateway
-```
-
-That's it — miu-bot handles the rest!
-
-<br>
-
-<details>
-<summary>Manual configuration (advanced)</summary>
-
-If you prefer to configure manually, add the following to `~/.miu-bot/config.json`:
-
-> Keep `claw_token` private. It should only be sent in `X-Claw-Token` header to your Mochat API endpoint.
-
-```json
-{
-  "channels": {
-    "mochat": {
-      "enabled": true,
-      "base_url": "https://mochat.io",
-      "socket_url": "https://mochat.io",
-      "socket_path": "/socket.io",
-      "claw_token": "claw_xxx",
-      "agent_user_id": "6982abcdef",
-      "sessions": ["*"],
-      "panels": ["*"],
-      "reply_delay_mode": "non-mention",
-      "reply_delay_ms": 120000
-    }
-  }
-}
-```
-
-
-
-</details>
 
 </details>
 
 <details>
 <summary><b>Discord</b></summary>
 
-**1. Create a bot**
-- Go to https://discord.com/developers/applications
-- Create an application → Bot → Add Bot
-- Copy the bot token
+**1.** Create app at [discord.com/developers](https://discord.com/developers/applications), add bot, enable **MESSAGE CONTENT INTENT**.
 
-**2. Enable intents**
-- In the Bot settings, enable **MESSAGE CONTENT INTENT**
-- (Optional) Enable **SERVER MEMBERS INTENT** if you plan to use allow lists based on member data
-
-**3. Get your User ID**
-- Discord Settings → Advanced → enable **Developer Mode**
-- Right-click your avatar → **Copy User ID**
-
-**4. Configure**
+**2. Configure**
 
 ```json
 {
@@ -278,33 +142,19 @@ If you prefer to configure manually, add the following to `~/.miu-bot/config.jso
 }
 ```
 
-**5. Invite the bot**
-- OAuth2 → URL Generator
-- Scopes: `bot`
-- Bot Permissions: `Send Messages`, `Read Message History`
-- Open the generated invite URL and add the bot to your server
-
-**6. Run**
-
-```bash
-miu-bot gateway
-```
+**3.** Invite bot (OAuth2 > `bot` scope > Send Messages + Read History), then run `miubot gateway`.
 
 </details>
 
 <details>
 <summary><b>WhatsApp</b></summary>
 
-Requires **Node.js ≥18**.
-
-**1. Link device**
+Requires **Node.js >= 18**.
 
 ```bash
-miu-bot channels login
-# Scan QR with WhatsApp → Settings → Linked Devices
+miubot channels login    # Scan QR with WhatsApp
+miubot gateway           # Start gateway (separate terminal)
 ```
-
-**2. Configure**
 
 ```json
 {
@@ -317,33 +167,12 @@ miu-bot channels login
 }
 ```
 
-**3. Run** (two terminals)
-
-```bash
-# Terminal 1
-miu-bot channels login
-
-# Terminal 2
-miu-bot gateway
-```
-
 </details>
 
 <details>
-<summary><b>Feishu (飞书)</b></summary>
+<summary><b>Feishu</b></summary>
 
-Uses **WebSocket** long connection — no public IP required.
-
-**1. Create a Feishu bot**
-- Visit [Feishu Open Platform](https://open.feishu.cn/app)
-- Create a new app → Enable **Bot** capability
-- **Permissions**: Add `im:message` (send messages)
-- **Events**: Add `im.message.receive_v1` (receive messages)
-  - Select **Long Connection** mode (requires running miu-bot first to establish connection)
-- Get **App ID** and **App Secret** from "Credentials & Basic Info"
-- Publish the app
-
-**2. Configure**
+WebSocket long connection — no public IP required.
 
 ```json
 {
@@ -352,86 +181,18 @@ Uses **WebSocket** long connection — no public IP required.
       "enabled": true,
       "appId": "cli_xxx",
       "appSecret": "xxx",
-      "encryptKey": "",
-      "verificationToken": "",
       "allowFrom": []
     }
   }
 }
 ```
 
-> `encryptKey` and `verificationToken` are optional for Long Connection mode.
-> `allowFrom`: Leave empty to allow all users, or add `["ou_xxx"]` to restrict access.
-
-**3. Run**
-
-```bash
-miu-bot gateway
-```
-
-> [!TIP]
-> Feishu uses WebSocket to receive messages — no webhook or public IP needed!
-
 </details>
 
 <details>
-<summary><b>QQ (QQ单聊)</b></summary>
+<summary><b>DingTalk</b></summary>
 
-Uses **botpy SDK** with WebSocket — no public IP required. Currently supports **private messages only**.
-
-**1. Register & create bot**
-- Visit [QQ Open Platform](https://q.qq.com) → Register as a developer (personal or enterprise)
-- Create a new bot application
-- Go to **开发设置 (Developer Settings)** → copy **AppID** and **AppSecret**
-
-**2. Set up sandbox for testing**
-- In the bot management console, find **沙箱配置 (Sandbox Config)**
-- Under **在消息列表配置**, click **添加成员** and add your own QQ number
-- Once added, scan the bot's QR code with mobile QQ → open the bot profile → tap "发消息" to start chatting
-
-**3. Configure**
-
-> - `allowFrom`: Leave empty for public access, or add user openids to restrict. You can find openids in the miu-bot logs when a user messages the bot.
-> - For production: submit a review in the bot console and publish. See [QQ Bot Docs](https://bot.q.qq.com/wiki/) for the full publishing flow.
-
-```json
-{
-  "channels": {
-    "qq": {
-      "enabled": true,
-      "appId": "YOUR_APP_ID",
-      "secret": "YOUR_APP_SECRET",
-      "allowFrom": []
-    }
-  }
-}
-```
-
-**4. Run**
-
-```bash
-miu-bot gateway
-```
-
-Now send a message to the bot from QQ — it should respond!
-
-</details>
-
-<details>
-<summary><b>DingTalk (钉钉)</b></summary>
-
-Uses **Stream Mode** — no public IP required.
-
-**1. Create a DingTalk bot**
-- Visit [DingTalk Open Platform](https://open-dev.dingtalk.com/)
-- Create a new app -> Add **Robot** capability
-- **Configuration**:
-  - Toggle **Stream Mode** ON
-- **Permissions**: Add necessary permissions for sending messages
-- Get **AppKey** (Client ID) and **AppSecret** (Client Secret) from "Credentials"
-- Publish the app
-
-**2. Configure**
+Stream mode — no public IP required.
 
 ```json
 {
@@ -446,33 +207,12 @@ Uses **Stream Mode** — no public IP required.
 }
 ```
 
-> `allowFrom`: Leave empty to allow all users, or add `["staffId"]` to restrict access.
-
-**3. Run**
-
-```bash
-miu-bot gateway
-```
-
 </details>
 
 <details>
 <summary><b>Slack</b></summary>
 
-Uses **Socket Mode** — no public URL required.
-
-**1. Create a Slack app**
-- Go to [Slack API](https://api.slack.com/apps) → **Create New App** → "From scratch"
-- Pick a name and select your workspace
-
-**2. Configure the app**
-- **Socket Mode**: Toggle ON → Generate an **App-Level Token** with `connections:write` scope → copy it (`xapp-...`)
-- **OAuth & Permissions**: Add bot scopes: `chat:write`, `reactions:write`, `app_mentions:read`
-- **Event Subscriptions**: Toggle ON → Subscribe to bot events: `message.im`, `message.channels`, `app_mention` → Save Changes
-- **App Home**: Scroll to **Show Tabs** → Enable **Messages Tab** → Check **"Allow users to send Slash commands and messages from the messages tab"**
-- **Install App**: Click **Install to Workspace** → Authorize → copy the **Bot Token** (`xoxb-...`)
-
-**3. Configure miu-bot**
+Socket mode — no public URL required.
 
 ```json
 {
@@ -487,36 +227,10 @@ Uses **Socket Mode** — no public URL required.
 }
 ```
 
-**4. Run**
-
-```bash
-miu-bot gateway
-```
-
-DM the bot directly or @mention it in a channel — it should respond!
-
-> [!TIP]
-> - `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all channel messages), or `"allowlist"` (restrict to specific channels).
-> - DM policy defaults to open. Set `"dm": {"enabled": false}` to disable DMs.
-
 </details>
 
 <details>
 <summary><b>Email</b></summary>
-
-Give miu-bot its own email account. It polls **IMAP** for incoming mail and replies via **SMTP** — like a personal email assistant.
-
-**1. Get credentials (Gmail example)**
-- Create a dedicated Gmail account for your bot (e.g. `my-miu-bot@gmail.com`)
-- Enable 2-Step Verification → Create an [App Password](https://myaccount.google.com/apppasswords)
-- Use this app password for both IMAP and SMTP
-
-**2. Configure**
-
-> - `consentGranted` must be `true` to allow mailbox access. This is a safety gate — set `false` to fully disable.
-> - `allowFrom`: Leave empty to accept emails from anyone, or restrict to specific senders.
-> - `smtpUseTls` and `smtpUseSsl` default to `true` / `false` respectively, which is correct for Gmail (port 587 + STARTTLS). No need to set them explicitly.
-> - Set `"autoReplyEnabled": false` if you only want to read/analyze emails without sending automatic replies.
 
 ```json
 {
@@ -526,70 +240,59 @@ Give miu-bot its own email account. It polls **IMAP** for incoming mail and repl
       "consentGranted": true,
       "imapHost": "imap.gmail.com",
       "imapPort": 993,
-      "imapUsername": "my-miu-bot@gmail.com",
+      "imapUsername": "my-bot@gmail.com",
       "imapPassword": "your-app-password",
       "smtpHost": "smtp.gmail.com",
       "smtpPort": 587,
-      "smtpUsername": "my-miu-bot@gmail.com",
+      "smtpUsername": "my-bot@gmail.com",
       "smtpPassword": "your-app-password",
-      "fromAddress": "my-miu-bot@gmail.com",
-      "allowFrom": ["your-real-email@gmail.com"]
+      "fromAddress": "my-bot@gmail.com",
+      "allowFrom": ["you@gmail.com"]
     }
   }
 }
 ```
 
+</details>
 
-**3. Run**
+<details>
+<summary><b>QQ</b></summary>
 
-```bash
-miu-bot gateway
+```json
+{
+  "channels": {
+    "qq": {
+      "enabled": true,
+      "appId": "YOUR_APP_ID",
+      "secret": "YOUR_APP_SECRET",
+      "allowFrom": []
+    }
+  }
+}
 ```
 
 </details>
 
-## 🌐 Agent Social Network
-
-🐈 miu-bot is capable of linking to the agent social network (agent community). **Just send one message and your miu-bot joins automatically!**
-
-| Platform | How to Join (send this message to your bot) |
-|----------|-------------|
-| [**Moltbook**](https://www.moltbook.com/) | `Read https://moltbook.com/skill.md and follow the instructions to join Moltbook` |
-| [**ClawdChat**](https://clawdchat.ai/) | `Read https://clawdchat.ai/skill.md and follow the instructions to join ClawdChat` |
-
-Simply send the command above to your miu-bot (via CLI or any chat channel), and it will handle the rest.
-
-## ⚙️ Configuration
-
-Config file: `~/.miu-bot/config.json`
-
-### Providers
-
-> [!TIP]
-> - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
-> - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
-> - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
+## Providers
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
-| `custom` | Any OpenAI-compatible endpoint | — |
-| `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
+| `openrouter` | LLM (all models, recommended) | [openrouter.ai](https://openrouter.ai) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
-| `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
+| `groq` | LLM + voice transcription (Whisper) | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `minimax` | LLM (MiniMax direct) | [platform.minimax.io](https://platform.minimax.io) |
-| `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
-| `vllm` | LLM (local, any OpenAI-compatible server) | — |
+| `aihubmix` | LLM (API gateway) | [aihubmix.com](https://aihubmix.com) |
+| `custom` | Any OpenAI-compatible endpoint | -- |
+| `vllm` | Local LLM server | -- |
 
 <details>
-<summary><b>Custom Provider (Any OpenAI-compatible API)</b></summary>
-
-If your provider is not listed above but exposes an **OpenAI-compatible API** (e.g. Together AI, Fireworks, Azure OpenAI, self-hosted endpoints), use the `custom` provider:
+<summary><b>Custom / vLLM provider setup</b></summary>
 
 ```json
 {
@@ -607,100 +310,40 @@ If your provider is not listed above but exposes an **OpenAI-compatible API** (e
 }
 ```
 
-> The `custom` provider routes through LiteLLM's OpenAI-compatible path. It works with any endpoint that follows the OpenAI chat completions API format. The model name is passed directly to the endpoint without any prefix.
-
 </details>
 
 <details>
-<summary><b>vLLM (local / OpenAI-compatible)</b></summary>
+<summary><b>Adding a new provider (developer guide)</b></summary>
 
-Run your own model with vLLM or any OpenAI-compatible server, then add to config:
+Two steps:
 
-**1. Start the server** (example):
-```bash
-vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
-```
-
-**2. Add to config** (partial — merge into `~/.miu-bot/config.json`):
-
-*Provider (key can be any non-empty string for local):*
-```json
-{
-  "providers": {
-    "vllm": {
-      "apiKey": "dummy",
-      "apiBase": "http://localhost:8000/v1"
-    }
-  }
-}
-```
-
-*Model:*
-```json
-{
-  "agents": {
-    "defaults": {
-      "model": "meta-llama/Llama-3.1-8B-Instruct"
-    }
-  }
-}
-```
-
-</details>
-
-<details>
-<summary><b>Adding a New Provider (Developer Guide)</b></summary>
-
-miu-bot uses a **Provider Registry** (`miu-bot/providers/registry.py`) as the single source of truth.
-Adding a new provider only takes **2 steps** — no if-elif chains to touch.
-
-**Step 1.** Add a `ProviderSpec` entry to `PROVIDERS` in `miu-bot/providers/registry.py`:
+**1.** Add a `ProviderSpec` to `PROVIDERS` in `miu_bot/providers/registry.py`:
 
 ```python
 ProviderSpec(
-    name="myprovider",                   # config field name
-    keywords=("myprovider", "mymodel"),  # model-name keywords for auto-matching
-    env_key="MYPROVIDER_API_KEY",        # env var for LiteLLM
-    display_name="My Provider",          # shown in `miubot status`
-    litellm_prefix="myprovider",         # auto-prefix: model → myprovider/model
-    skip_prefixes=("myprovider/",),      # don't double-prefix
+    name="myprovider",
+    keywords=("myprovider",),
+    env_key="MYPROVIDER_API_KEY",
+    display_name="My Provider",
+    litellm_prefix="myprovider",
+    skip_prefixes=("myprovider/",),
 )
 ```
 
-**Step 2.** Add a field to `ProvidersConfig` in `miu-bot/config/schema.py`:
+**2.** Add a field to `ProvidersConfig` in `miu_bot/config/schema.py`:
 
 ```python
-class ProvidersConfig(BaseModel):
-    ...
-    myprovider: ProviderConfig = ProviderConfig()
+myprovider: ProviderConfig = ProviderConfig()
 ```
 
-That's it! Environment variables, model prefixing, config matching, and `miubot status` display will all work automatically.
-
-**Common `ProviderSpec` options:**
-
-| Field | Description | Example |
-|-------|-------------|---------|
-| `litellm_prefix` | Auto-prefix model names for LiteLLM | `"dashscope"` → `dashscope/qwen-max` |
-| `skip_prefixes` | Don't prefix if model already starts with these | `("dashscope/", "openrouter/")` |
-| `env_extras` | Additional env vars to set | `(("ZHIPUAI_API_KEY", "{api_key}"),)` |
-| `model_overrides` | Per-model parameter overrides | `(("kimi-k2.5", {"temperature": 1.0}),)` |
-| `is_gateway` | Can route any model (like OpenRouter) | `True` |
-| `detect_by_key_prefix` | Detect gateway by API key prefix | `"sk-or-"` |
-| `detect_by_base_keyword` | Detect gateway by API base URL | `"openrouter"` |
-| `strip_model_prefix` | Strip existing prefix before re-prefixing | `True` (for AiHubMix) |
+Done. Environment variables, model prefixing, config matching, and `miubot status` all work automatically.
 
 </details>
 
-
-### MCP (Model Context Protocol)
+## MCP (Model Context Protocol)
 
 > [!TIP]
-> The config format is compatible with Claude Desktop / Cursor. You can copy MCP server configs directly from any MCP server's README.
-
-miu-bot supports [MCP](https://modelcontextprotocol.io/) — connect external tool servers and use them as native agent tools.
-
-Add MCP servers to your `config.json`:
+> Config format is compatible with Claude Desktop / Cursor. Copy MCP server configs directly.
 
 ```json
 {
@@ -715,146 +358,128 @@ Add MCP servers to your `config.json`:
 }
 ```
 
-Two transport modes are supported:
-
 | Mode | Config | Example |
 |------|--------|---------|
 | **Stdio** | `command` + `args` | Local process via `npx` / `uvx` |
-| **HTTP** | `url` | Remote endpoint (`https://mcp.example.com/sse`) |
+| **HTTP** | `url` | Remote endpoint |
 
-MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
+MCP tools are automatically discovered and registered on startup.
 
+## Deployment
 
+### Single-Process (Development)
 
+```bash
+miubot serve --role combined
+```
 
-### Security
+### Multi-Tenant (Production)
 
-> [!TIP]
-> For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
+```bash
+# Gateway — message routing + workspace resolution
+miubot serve --role gateway --bots-config /path/to/bots.yaml
+
+# Worker — task processing with optional bot filtering
+miubot serve --role worker --bots-config /path/to/bots.yaml --bot-filter bot1,bot2
+```
+
+### Multi-Bot Workspace
+
+Define multiple bots with separate identities, providers, and channels in `bots.yaml`:
+
+```yaml
+bots:
+  assistant:
+    soul: /path/to/soul.md
+    provider:
+      model: anthropic/claude-sonnet-4-5-20250929
+      api_key_env: ANTHROPIC_API_KEY
+    channels:
+      telegram:
+        token_env: ASSISTANT_TG_TOKEN
+    jobs:
+      morning_briefing:
+        schedule: "0 8 * * *"
+        timezone: "Asia/Saigon"
+        prompt: "Summarize top news"
+        targets:
+          - channel: telegram
+            chat_id_env: NEWS_CHAT_ID
+```
+
+### Docker
+
+```bash
+docker build -t miu-bot .
+docker run -v ~/.miu-bot:/root/.miu-bot -p 18790:18790 miu-bot gateway
+```
+
+### Kubernetes
+
+Helm chart at `charts/miu-bot/`:
+
+```bash
+helm install miu-bot oci://harbor.dataplanelabs.com/dataplanelabs/charts/miu-bot
+```
+
+## Security
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
-| `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
-
+| `tools.restrictToWorkspace` | `false` | Sandbox agent tools to workspace directory |
+| `channels.*.allowFrom` | `[]` (all) | Whitelist of user IDs per channel |
 
 ## CLI Reference
 
 | Command | Description |
 |---------|-------------|
 | `miubot onboard` | Initialize config & workspace |
-| `miubot agent -m "..."` | Chat with the agent |
 | `miubot agent` | Interactive chat mode |
-| `miubot agent --no-markdown` | Show plain-text replies |
-| `miubot agent --logs` | Show runtime logs during chat |
-| `miubot gateway` | Start the gateway |
+| `miubot agent -m "..."` | Single message |
+| `miubot gateway` | Start channel gateway |
+| `miubot serve --role [combined\|gateway\|worker]` | Start server in specified role |
 | `miubot status` | Show status |
 | `miubot channels login` | Link WhatsApp (scan QR) |
 | `miubot channels status` | Show channel status |
-
-Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
+| `miubot workspace [create\|list\|config\|pause\|delete]` | Manage workspaces |
+| `miubot db [migrate\|import-legacy\|status]` | Database operations |
 
 <details>
 <summary><b>Scheduled Tasks (Cron)</b></summary>
 
 ```bash
-# Add a job
-miu-bot cron add --name "daily" --message "Good morning!" --cron "0 9 * * *"
-miu-bot cron add --name "hourly" --message "Check status" --every 3600
-
-# List jobs
-miu-bot cron list
-
-# Remove a job
-miu-bot cron remove <job_id>
+miubot cron add --name "daily" --message "Good morning!" --cron "0 9 * * *"
+miubot cron add --name "hourly" --message "Check status" --every 3600
+miubot cron list
+miubot cron remove <job_id>
 ```
 
 </details>
 
-## 🐳 Docker
-
-> [!TIP]
-> The `-v ~/.miu-bot:/root/.miu-bot` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
-
-Build and run miu-bot in a container:
-
-```bash
-# Build the image
-docker build -t miu-bot .
-
-# Initialize config (first time only)
-docker run -v ~/.miu-bot:/root/.miu-bot --rm miu-bot onboard
-
-# Edit config on host to add API keys
-vim ~/.miu-bot/config.json
-
-# Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat)
-docker run -v ~/.miu-bot:/root/.miu-bot -p 18790:18790 miu-bot gateway
-
-# Or run a single command
-docker run -v ~/.miu-bot:/root/.miu-bot --rm miu-bot agent -m "Hello!"
-docker run -v ~/.miu-bot:/root/.miu-bot --rm miu-bot status
-```
-
-## 📁 Project Structure
+## Project Structure
 
 ```
-miu-bot/
-├── agent/          # 🧠 Core agent logic
-│   ├── loop.py     #    Agent loop (LLM ↔ tool execution)
-│   ├── context.py  #    Prompt builder
-│   ├── memory.py   #    Persistent memory
-│   ├── skills.py   #    Skills loader
-│   ├── subagent.py #    Background task execution
-│   └── tools/      #    Built-in tools (incl. spawn)
-├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
-├── channels/       # 📱 Chat channel integrations
-├── bus/            # 🚌 Message routing
-├── cron/           # ⏰ Scheduled tasks
-├── heartbeat/      # 💓 Proactive wake-up
-├── providers/      # 🤖 LLM providers (OpenRouter, etc.)
-├── session/        # 💬 Conversation sessions
-├── config/         # ⚙️ Configuration
-└── cli/            # 🖥️ Commands
+miu_bot/
+├── agent/          # Core agent logic (loop, context, memory, skills, tools)
+├── channels/       # Chat platform integrations + BotManager
+├── bus/            # Message bus (async queues + events)
+├── providers/      # LLM provider abstraction (registry pattern)
+├── config/         # Configuration schema (Pydantic) + bots.yaml loader
+├── session/        # Conversation session storage (JSONL)
+├── skills/         # Skills system (loader, merger, schema)
+├── memory/         # BASB 3-tier memory consolidation
+├── dispatch/       # Temporal workflows + schedules
+├── gateway/        # FastAPI gateway (routing, admin API)
+├── worker/         # Worker (task processing, per-bot context)
+├── workspace/      # Multi-tenant workspace management
+├── db/             # Storage backend (Postgres)
+├── observability/  # OpenTelemetry tracing + metrics
+├── cron/           # Scheduled task service
+├── heartbeat/      # Proactive wake-up
+├── cli/            # CLI commands (Typer)
+└── utils/          # Shared helpers
 ```
 
-## 🤝 Contribute & Roadmap
+## License
 
-PRs welcome! The codebase is intentionally small and readable. 🤗
-
-**Roadmap** — Pick an item and [open a PR](https://github.com/dataplanelabs/miu-bot/pulls)!
-
-- [ ] **Multi-modal** — See and hear (images, voice, video)
-- [ ] **Long-term memory** — Never forget important context
-- [ ] **Better reasoning** — Multi-step planning and reflection
-- [ ] **More integrations** — Calendar and more
-- [ ] **Self-improvement** — Learn from feedback and mistakes
-
-### Contributors
-
-<a href="https://github.com/dataplanelabs/miu-bot/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=dataplanelabs/miu-bot&max=100&columns=12&updated=20260210" alt="Contributors" />
-</a>
-
-
-## ⭐ Star History
-
-<div align="center">
-  <a href="https://star-history.com/#dataplanelabs/miu-bot&Date">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=dataplanelabs/miu-bot&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=dataplanelabs/miu-bot&type=Date" />
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=dataplanelabs/miu-bot&type=Date" style="border-radius: 15px; box-shadow: 0 0 30px rgba(0, 217, 255, 0.3);" />
-    </picture>
-  </a>
-</div>
-
-<p align="center">
-  <em> Thanks for visiting ✨ miu-bot!</em><br><br>
-  <img src="https://visitor-badge.laobi.icu/badge?page_id=HKUDS.miu-bot&style=for-the-badge&color=00d4ff" alt="Views">
-</p>
-
-
-<p align="center">
-  <sub>miu-bot is for educational, research, and technical exchange purposes only</sub>
-</p>
+[MIT](LICENSE)

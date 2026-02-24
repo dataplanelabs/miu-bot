@@ -19,7 +19,9 @@ __pycache__/
 poetry.lock
 .pytest_cache/
 .coverage
+htmlcov/
 repomix-output.xml
 botpy.log
 tests/
 plans/
+.temp/

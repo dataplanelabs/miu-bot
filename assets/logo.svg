@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 140" fill="none">
+  <!-- Cat face icon -->
+  <g transform="translate(10, 10)">
+    <!-- Left ear -->
+    <path d="M15 55 L35 5 L55 45" fill="#6C63FF" stroke="#5A52D5" stroke-width="2"/>
+    <!-- Right ear -->
+    <path d="M65 45 L85 5 L105 55" fill="#6C63FF" stroke="#5A52D5" stroke-width="2"/>
+    <!-- Head -->
+    <ellipse cx="60" cy="75" rx="50" ry="42" fill="#6C63FF"/>
+    <!-- Inner left ear -->
+    <path d="M25 50 L37 18 L49 45" fill="#A29BFE"/>
+    <!-- Inner right ear -->
+    <path d="M71 45 L83 18 L95 50" fill="#A29BFE"/>
+    <!-- Left eye -->
+    <ellipse cx="42" cy="70" rx="8" ry="9" fill="white"/>
+    <ellipse cx="44" cy="70" rx="5" ry="6" fill="#2D3436"/>
+    <circle cx="46" cy="67" r="2" fill="white"/>
+    <!-- Right eye -->
+    <ellipse cx="78" cy="70" rx="8" ry="9" fill="white"/>
+    <ellipse cx="80" cy="70" rx="5" ry="6" fill="#2D3436"/>
+    <circle cx="82" cy="67" r="2" fill="white"/>
+    <!-- Nose -->
+    <path d="M57 82 L60 86 L63 82" fill="#FF6B9D" stroke="#FF6B9D" stroke-width="1" stroke-linejoin="round"/>
+    <!-- Mouth -->
+    <path d="M60 86 Q55 93 48 90" fill="none" stroke="#2D3436" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M60 86 Q65 93 72 90" fill="none" stroke="#2D3436" stroke-width="1.5" stroke-linecap="round"/>
+    <!-- Whiskers left -->
+    <line x1="10" y1="75" x2="35" y2="80" stroke="#2D3436" stroke-width="1.2" stroke-linecap="round"/>
+    <line x1="8" y1="85" x2="34" y2="85" stroke="#2D3436" stroke-width="1.2" stroke-linecap="round"/>
+    <!-- Whiskers right -->
+    <line x1="86" y1="80" x2="110" y2="75" stroke="#2D3436" stroke-width="1.2" stroke-linecap="round"/>
+    <line x1="86" y1="85" x2="112" y2="85" stroke="#2D3436" stroke-width="1.2" stroke-linecap="round"/>
+    <!-- Bot indicator - small antenna -->
+    <line x1="60" y1="33" x2="60" y2="18" stroke="#6C63FF" stroke-width="2.5" stroke-linecap="round"/>
+    <circle cx="60" cy="14" r="4" fill="#00D2FF" stroke="#6C63FF" stroke-width="1.5"/>
+  </g>
+  <!-- Text: miu-bot -->
+  <text x="140" y="92" font-family="'SF Pro Display', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="72" font-weight="700" fill="#2D3436" letter-spacing="-1">
+    <tspan fill="#6C63FF">miu</tspan><tspan fill="#636E72">-</tspan><tspan fill="#2D3436">bot</tspan>
+  </text>
+</svg>
