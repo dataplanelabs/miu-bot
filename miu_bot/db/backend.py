@@ -31,7 +31,7 @@ class Session:
 
 @dataclass
 class Message:
-    id: int
+    id: str
     session_id: str
     role: str  # user | assistant | system | tool
     content: str
@@ -143,7 +143,7 @@ class MemoryBackend(Protocol):
         self, session_id: str, role: str, content: str, metadata: dict[str, Any] | None = None
     ) -> Message: ...
     async def get_messages(self, session_id: str, limit: int = 50) -> list[Message]: ...
-    async def mark_consolidated(self, session_id: str, up_to_id: int) -> int: ...
+    async def mark_consolidated(self, session_id: str, up_to_id: str) -> int: ...
 
     # Memories
     async def save_memory(

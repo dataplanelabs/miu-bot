@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -63,14 +62,11 @@ class PostgresBackend:
     async def create_workspace(
         self, name: str, identity: str, config_overrides: dict[str, Any] | None = None
     ) -> Workspace:
-        ws_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
         overrides = json.dumps(config_overrides or {})
         row = await self._pool.fetchrow(
-            """INSERT INTO workspaces (id, name, identity, config_overrides, status, created_at, updated_at)
-               VALUES ($1, $2, $3, $4::jsonb, 'active', $5, $5)
-               RETURNING *""",
-            ws_id, name, identity, overrides, now,
+            """INSERT INTO workspaces (name, identity, config_overrides)
+               VALUES ($1, $2, $3::jsonb) RETURNING *""",
+            name, identity, overrides,
         )
         return self._row_to_workspace(row)
 
@@ -105,15 +101,13 @@ class PostgresBackend:
     async def get_or_create_session(
         self, workspace_id: str, channel: str, identifier: str
     ) -> Session:
-        sess_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
         row = await self._pool.fetchrow(
-            """INSERT INTO sessions (id, workspace_id, channel, channel_identifier, metadata, created_at)
-               VALUES ($1, $2, $3, $4, '{}'::jsonb, $5)
+            """INSERT INTO sessions (workspace_id, channel, channel_identifier)
+               VALUES ($1, $2, $3)
                ON CONFLICT (workspace_id, channel, channel_identifier)
                DO UPDATE SET channel = EXCLUDED.channel
                RETURNING *""",
-            sess_id, workspace_id, channel, identifier, now,
+            workspace_id, channel, identifier,
         )
         return self._row_to_session(row)
 
@@ -128,10 +122,9 @@ class PostgresBackend:
     ) -> Message:
         meta_json = json.dumps(metadata or {})
         row = await self._pool.fetchrow(
-            """INSERT INTO messages (session_id, role, content, metadata, consolidated, created_at)
-               VALUES ($1, $2, $3, $4::jsonb, FALSE, $5)
-               RETURNING *""",
-            session_id, role, content, meta_json, datetime.now(timezone.utc),
+            """INSERT INTO messages (session_id, role, content, metadata)
+               VALUES ($1, $2, $3, $4::jsonb) RETURNING *""",
+            session_id, role, content, meta_json,
         )
         return self._row_to_message(row)
 
@@ -145,10 +138,11 @@ class PostgresBackend:
         )
         return [self._row_to_message(r) for r in rows]
 
-    async def mark_consolidated(self, session_id: str, up_to_id: int) -> int:
+    async def mark_consolidated(self, session_id: str, up_to_id: str) -> int:
         tag = await self._pool.execute(
             """UPDATE messages SET consolidated = TRUE
-               WHERE session_id = $1 AND id <= $2 AND consolidated = FALSE""",
+               WHERE session_id = $1 AND consolidated = FALSE
+                 AND id <= $2::uuid""",
             session_id, up_to_id,
         )
         return int(tag.split()[-1])
@@ -165,15 +159,12 @@ class PostgresBackend:
         source_type: str | None = None,
         priority: int = 0,
     ) -> Memory:
-        mem_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
         row = await self._pool.fetchrow(
-            """INSERT INTO memories (id, workspace_id, category, content, source_session_id,
-                                    tier, source_type, priority, created_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-               RETURNING *""",
-            mem_id, workspace_id, category, content, source_session_id,
-            tier, source_type, priority, now,
+            """INSERT INTO memories (workspace_id, category, content, source_session_id,
+                                    tier, source_type, priority)
+               VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *""",
+            workspace_id, category, content, source_session_id,
+            tier, source_type, priority,
         )
         return self._row_to_memory(row)
 
@@ -204,9 +195,9 @@ class PostgresBackend:
                     workspace_id, category,
                 )
                 await conn.execute(
-                    """INSERT INTO memories (id, workspace_id, category, content, created_at)
-                       VALUES ($1, $2, $3, $4, $5)""",
-                    str(uuid.uuid4()), workspace_id, category, content, datetime.now(timezone.utc),
+                    """INSERT INTO memories (workspace_id, category, content)
+                       VALUES ($1, $2, $3)""",
+                    workspace_id, category, content,
                 )
 
     # -- Tier-filtered memories --
@@ -229,14 +220,14 @@ class PostgresBackend:
         row = await self._pool.fetchrow(
             """INSERT INTO daily_notes
                    (workspace_id, date, summary, key_topics, decisions_made,
-                    action_items, emotional_tone, message_count, consolidated, created_at)
-               VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8, $9, $10)
+                    action_items, emotional_tone, message_count, consolidated)
+               VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8, $9)
                ON CONFLICT (workspace_id, date) DO NOTHING
                RETURNING *""",
             note.workspace_id, note.date, note.summary,
             json.dumps(note.key_topics), json.dumps(note.decisions_made),
             json.dumps(note.action_items), note.emotional_tone,
-            note.message_count, note.consolidated, datetime.now(timezone.utc),
+            note.message_count, note.consolidated,
         )
         if row is None:
             # Already exists — return existing
@@ -264,12 +255,12 @@ class PostgresBackend:
         await self._pool.execute(
             """INSERT INTO consolidation_log
                    (workspace_id, type, period_start, period_end, input_count,
-                    output_count, model_used, tokens_used, cost_estimate, status, error, created_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)""",
+                    output_count, model_used, tokens_used, cost_estimate, status, error)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)""",
             entry.workspace_id, entry.type, entry.period_start, entry.period_end,
             entry.input_count, entry.output_count, entry.model_used,
             entry.tokens_used, entry.cost_estimate, entry.status,
-            entry.error, datetime.now(timezone.utc),
+            entry.error,
         )
 
     # -- Unconsolidated messages (cross-session) --
@@ -356,18 +347,16 @@ class PostgresBackend:
         self, workspace_id: str, template_type: str, content: str,
         config: dict[str, Any] | None = None,
     ) -> WorkspaceTemplate:
-        tmpl_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
         config_json = json.dumps(config or {})
         row = await self._pool.fetchrow(
             """INSERT INTO workspace_templates
-                   (id, workspace_id, template_type, content, config, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, $5::jsonb, $6, $6)
+                   (workspace_id, template_type, content, config)
+               VALUES ($1, $2, $3, $4::jsonb)
                ON CONFLICT (workspace_id, template_type) DO UPDATE
                SET content = EXCLUDED.content, config = EXCLUDED.config,
-                   updated_at = EXCLUDED.updated_at
+                   updated_at = now()
                RETURNING *""",
-            tmpl_id, workspace_id, template_type, content, config_json, now,
+            workspace_id, template_type, content, config_json,
         )
         return self._row_to_template(row)
 
@@ -383,25 +372,23 @@ class PostgresBackend:
     async def upsert_skill(
         self, workspace_id: str, skill: WorkspaceSkill,
     ) -> WorkspaceSkill:
-        skill_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
         row = await self._pool.fetchrow(
             """INSERT INTO workspace_skills
-                   (id, workspace_id, name, description, identity, rules, mcp_servers,
-                    tags, source, source_version, enabled, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb,
-                       $9, $10, $11, $12, $12)
+                   (workspace_id, name, description, identity, rules, mcp_servers,
+                    tags, source, source_version, enabled)
+               VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb,
+                       $8, $9, $10)
                ON CONFLICT (workspace_id, name) DO UPDATE
                SET description = EXCLUDED.description, identity = EXCLUDED.identity,
                    rules = EXCLUDED.rules, mcp_servers = EXCLUDED.mcp_servers,
                    tags = EXCLUDED.tags, source = EXCLUDED.source,
                    source_version = EXCLUDED.source_version, enabled = EXCLUDED.enabled,
-                   updated_at = EXCLUDED.updated_at
+                   updated_at = now()
                RETURNING *""",
-            skill_id, workspace_id, skill.name, skill.description, skill.identity,
+            workspace_id, skill.name, skill.description, skill.identity,
             json.dumps(skill.rules), json.dumps(skill.mcp_servers),
             json.dumps(skill.tags), skill.source, skill.source_version,
-            skill.enabled, now,
+            skill.enabled,
         )
         return self._row_to_skill(row)
 
@@ -430,7 +417,7 @@ class PostgresBackend:
         if isinstance(overrides, str):
             overrides = json.loads(overrides)
         return Workspace(
-            id=row["id"], name=row["name"], identity=row["identity"],
+            id=str(row["id"]), name=row["name"], identity=row["identity"],
             config_overrides=overrides or {},
             status=row["status"],
             created_at=row["created_at"], updated_at=row["updated_at"],
@@ -442,7 +429,7 @@ class PostgresBackend:
         if isinstance(meta, str):
             meta = json.loads(meta)
         return Session(
-            id=row["id"], workspace_id=row["workspace_id"],
+            id=str(row["id"]), workspace_id=str(row["workspace_id"]),
             channel=row["channel"], channel_identifier=row["channel_identifier"],
             metadata=meta or {},
             last_consolidated_at=row.get("last_consolidated_at"),
@@ -455,7 +442,7 @@ class PostgresBackend:
         if isinstance(meta, str):
             meta = json.loads(meta)
         return Message(
-            id=row["id"], session_id=row["session_id"],
+            id=str(row["id"]), session_id=str(row["session_id"]),
             role=row["role"], content=row["content"],
             metadata=meta or {},
             consolidated=row["consolidated"], created_at=row["created_at"],
@@ -463,10 +450,11 @@ class PostgresBackend:
 
     @staticmethod
     def _row_to_memory(row: Any) -> Memory:
+        src_sid = row.get("source_session_id")
         return Memory(
-            id=row["id"], workspace_id=row["workspace_id"],
+            id=str(row["id"]), workspace_id=str(row["workspace_id"]),
             category=row["category"], content=row["content"],
-            source_session_id=row.get("source_session_id"),
+            source_session_id=str(src_sid) if src_sid else None,
             created_at=row["created_at"],
             tier=row.get("tier", "active"),
             source_type=row.get("source_type"),
@@ -486,7 +474,7 @@ class PostgresBackend:
         if isinstance(items, str):
             items = json.loads(items)
         return DailyNote(
-            id=str(row["id"]), workspace_id=row["workspace_id"],
+            id=str(row["id"]), workspace_id=str(row["workspace_id"]),
             date=row["date"], summary=row.get("summary"),
             key_topics=topics or [], decisions_made=decisions or [],
             action_items=items or [], emotional_tone=row.get("emotional_tone"),
@@ -501,7 +489,7 @@ class PostgresBackend:
         if isinstance(config, str):
             config = json.loads(config)
         return WorkspaceTemplate(
-            id=row["id"], workspace_id=row["workspace_id"],
+            id=str(row["id"]), workspace_id=str(row["workspace_id"]),
             template_type=row["template_type"], content=row["content"],
             config=config or {},
             created_at=row["created_at"], updated_at=row["updated_at"],
@@ -519,7 +507,7 @@ class PostgresBackend:
         if isinstance(tags, str):
             tags = json.loads(tags)
         return WorkspaceSkill(
-            id=row["id"], workspace_id=row["workspace_id"],
+            id=str(row["id"]), workspace_id=str(row["workspace_id"]),
             name=row["name"], description=row["description"],
             identity=row["identity"], rules=rules or [],
             mcp_servers=mcp or {}, tags=tags or [],

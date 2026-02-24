@@ -333,12 +333,14 @@ def _setup_logging(verbose: bool):
 
 
 def _create_backend(config):
-    """Create the appropriate MemoryBackend from config."""
-    if config.backend.type == "postgres" and config.database.url:
-        # Postgres backend requires pool — handled in async context
-        return None  # Caller must create pool + backend in async
-    from miu_bot.db.file_backend import FileBackend
-    return FileBackend()
+    """Create the appropriate MemoryBackend from config.
+
+    Returns None — caller must create pool + PostgresBackend in async context.
+    """
+    if not config.database.url:
+        console.print("[red]Error: database.url not configured. Set MIU_BOT_DATABASE_URL.[/red]")
+        raise typer.Exit(1)
+    return None
 
 
 async def _ensure_workspaces(
@@ -1386,12 +1388,17 @@ workspace_app = typer.Typer(help="Manage workspaces")
 app.add_typer(workspace_app, name="workspace")
 
 
-def _make_backend(config):
-    """Create the appropriate backend from config."""
-    if config.backend.type == "postgres" and config.database.url:
-        raise typer.Exit("Postgres backend requires async context. Use 'miubot serve' instead.")
-    from miu_bot.db.file_backend import FileBackend
-    return FileBackend()
+async def _ws_backend(config):
+    """Create async PG pool + PostgresBackend for workspace CLI commands."""
+    from miu_bot.db.pool import create_pool
+    from miu_bot.db.postgres import PostgresBackend
+
+    if not config.database.url:
+        console.print("[red]Error: database.url not configured[/red]")
+        console.print("Set MIU_BOT_DATABASE_URL or add to config.json")
+        raise typer.Exit(1)
+    pool = await create_pool(config.database.url)
+    return pool, PostgresBackend(pool)
 
 
 @workspace_app.command("create")
@@ -1402,15 +1409,17 @@ def workspace_create(
     """Create a new workspace."""
     from miu_bot.config.loader import load_config
     from miu_bot.workspace.service import WorkspaceService
-    from miu_bot.db.file_backend import FileBackend
 
     config = load_config()
-    backend = FileBackend()
 
     async def _run():
-        svc = WorkspaceService(backend)
-        ws = await svc.create(name, identity_path=identity)
-        console.print(f"[green]✓[/green] Created workspace '{ws.name}' ({ws.id})")
+        pool, backend = await _ws_backend(config)
+        try:
+            svc = WorkspaceService(backend)
+            ws = await svc.create(name, identity_path=identity)
+            console.print(f"[green]✓[/green] Created workspace '{ws.name}' ({ws.id})")
+        finally:
+            await pool.close()
 
     import asyncio
     asyncio.run(_run())
@@ -1421,30 +1430,33 @@ def workspace_list():
     """List all workspaces."""
     from miu_bot.config.loader import load_config
     from miu_bot.workspace.service import WorkspaceService
-    from miu_bot.db.file_backend import FileBackend
 
-    backend = FileBackend()
+    config = load_config()
 
     async def _run():
-        svc = WorkspaceService(backend)
-        workspaces = await svc.list()
-        if not workspaces:
-            console.print("No workspaces found.")
-            return
-        table = Table(title="Workspaces")
-        table.add_column("Name", style="cyan")
-        table.add_column("Status")
-        table.add_column("ID", style="dim")
-        table.add_column("Created")
-        for ws in workspaces:
-            status_style = "green" if ws.status == "active" else "yellow"
-            table.add_row(
-                ws.name,
-                f"[{status_style}]{ws.status}[/{status_style}]",
-                ws.id[:8],
-                ws.created_at.strftime("%Y-%m-%d %H:%M"),
-            )
-        console.print(table)
+        pool, backend = await _ws_backend(config)
+        try:
+            svc = WorkspaceService(backend)
+            workspaces = await svc.list()
+            if not workspaces:
+                console.print("No workspaces found.")
+                return
+            table = Table(title="Workspaces")
+            table.add_column("Name", style="cyan")
+            table.add_column("Status")
+            table.add_column("ID", style="dim")
+            table.add_column("Created")
+            for ws in workspaces:
+                status_style = "green" if ws.status == "active" else "yellow"
+                table.add_row(
+                    ws.name,
+                    f"[{status_style}]{ws.status}[/{status_style}]",
+                    ws.id[:8],
+                    ws.created_at.strftime("%Y-%m-%d %H:%M"),
+                )
+            console.print(table)
+        finally:
+            await pool.close()
 
     import asyncio
     asyncio.run(_run())
@@ -1457,35 +1469,38 @@ def workspace_config(
 ):
     """View or update workspace config overrides."""
     import json as _json
+    from miu_bot.config.loader import load_config
     from miu_bot.workspace.service import WorkspaceService
-    from miu_bot.db.file_backend import FileBackend
 
-    backend = FileBackend()
+    config = load_config()
 
     async def _run():
-        svc = WorkspaceService(backend)
-        if set_val:
-            key, _, value = set_val.partition("=")
-            if not key or not value:
-                console.print("[red]Format: --set key=value[/red]")
-                raise typer.Exit(1)
-            # Try to parse value as JSON, fall back to string
-            try:
-                parsed = _json.loads(value)
-            except _json.JSONDecodeError:
-                parsed = value
-            ws = await svc.update_config(name, key.strip(), parsed)
-            if ws:
-                console.print(f"[green]✓[/green] Updated {key} for workspace '{name}'")
+        pool, backend = await _ws_backend(config)
+        try:
+            svc = WorkspaceService(backend)
+            if set_val:
+                key, _, value = set_val.partition("=")
+                if not key or not value:
+                    console.print("[red]Format: --set key=value[/red]")
+                    raise typer.Exit(1)
+                try:
+                    parsed = _json.loads(value)
+                except _json.JSONDecodeError:
+                    parsed = value
+                ws = await svc.update_config(name, key.strip(), parsed)
+                if ws:
+                    console.print(f"[green]✓[/green] Updated {key} for workspace '{name}'")
+                else:
+                    console.print(f"[red]Workspace '{name}' not found[/red]")
             else:
-                console.print(f"[red]Workspace '{name}' not found[/red]")
-        else:
-            ws = await svc.get(name)
-            if not ws:
-                console.print(f"[red]Workspace '{name}' not found[/red]")
-                raise typer.Exit(1)
-            console.print(f"[cyan]{name}[/cyan] config overrides:")
-            console.print(_json.dumps(ws.config_overrides, indent=2))
+                ws = await svc.get(name)
+                if not ws:
+                    console.print(f"[red]Workspace '{name}' not found[/red]")
+                    raise typer.Exit(1)
+                console.print(f"[cyan]{name}[/cyan] config overrides:")
+                console.print(_json.dumps(ws.config_overrides, indent=2))
+        finally:
+            await pool.close()
 
     import asyncio
     asyncio.run(_run())
@@ -1496,18 +1511,22 @@ def workspace_pause(
     name: str = typer.Argument(..., help="Workspace name"),
 ):
     """Pause a workspace (stop processing messages)."""
+    from miu_bot.config.loader import load_config
     from miu_bot.workspace.service import WorkspaceService
-    from miu_bot.db.file_backend import FileBackend
 
-    backend = FileBackend()
+    config = load_config()
 
     async def _run():
-        svc = WorkspaceService(backend)
-        ws = await svc.set_status(name, "paused")
-        if ws:
-            console.print(f"[green]✓[/green] Workspace '{name}' paused")
-        else:
-            console.print(f"[red]Workspace '{name}' not found[/red]")
+        pool, backend = await _ws_backend(config)
+        try:
+            svc = WorkspaceService(backend)
+            ws = await svc.set_status(name, "paused")
+            if ws:
+                console.print(f"[green]✓[/green] Workspace '{name}' paused")
+            else:
+                console.print(f"[red]Workspace '{name}' not found[/red]")
+        finally:
+            await pool.close()
 
     import asyncio
     asyncio.run(_run())
@@ -1519,21 +1538,25 @@ def workspace_delete(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ):
     """Delete a workspace."""
+    from miu_bot.config.loader import load_config
     from miu_bot.workspace.service import WorkspaceService
-    from miu_bot.db.file_backend import FileBackend
+
+    config = load_config()
 
     if not force:
         if not typer.confirm(f"Delete workspace '{name}'?"):
             raise typer.Abort()
 
-    backend = FileBackend()
-
     async def _run():
-        svc = WorkspaceService(backend)
-        if await svc.delete(name):
-            console.print(f"[green]✓[/green] Deleted workspace '{name}'")
-        else:
-            console.print(f"[red]Workspace '{name}' not found[/red]")
+        pool, backend = await _ws_backend(config)
+        try:
+            svc = WorkspaceService(backend)
+            if await svc.delete(name):
+                console.print(f"[green]✓[/green] Deleted workspace '{name}'")
+            else:
+                console.print(f"[red]Workspace '{name}' not found[/red]")
+        finally:
+            await pool.close()
 
     import asyncio
     asyncio.run(_run())

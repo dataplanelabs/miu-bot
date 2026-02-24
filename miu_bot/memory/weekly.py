@@ -80,7 +80,7 @@ class WeeklyConsolidation:
             for n in notes
         )
         active_text = "\n".join(
-            f"[{m.id[:8]}] {m.content}" for m in active
+            f"[{m.id}] {m.content}" for m in active
         )
 
         prompt = WEEKLY_CONSOLIDATION_PROMPT.format(
@@ -106,6 +106,11 @@ class WeeklyConsolidation:
         if text.startswith("```"):
             text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         result = json_repair.loads(text)
+        if not isinstance(result, dict):
+            raise ValueError(
+                f"LLM returned non-dict response ({type(result).__name__}): "
+                f"{str(result)[:200]}"
+            )
 
         # Save weekly insight as Reference memory
         if insight := result.get("weekly_insight"):
@@ -128,9 +133,12 @@ class WeeklyConsolidation:
                 source_type="weekly_insight",
             )
 
-        # Demote stale Active memories
+        # Demote stale Active memories (IDs from LLM may be hallucinated)
         for mem_id in result.get("demote_from_active", []):
-            await self.backend.promote_memory_tier(mem_id, "archive")
+            try:
+                await self.backend.promote_memory_tier(mem_id, "archive")
+            except Exception as e:
+                logger.warning(f"Failed to demote memory {mem_id}: {e}")
 
         # Mark daily notes as consolidated
         note_ids = [n.id for n in notes]

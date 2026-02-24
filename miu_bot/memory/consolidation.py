@@ -92,7 +92,7 @@ class DailyConsolidation:
         # Get current active memories for context
         active_memories = await self.backend.get_memories_by_tier(ws.id, "active")
         memories_text = "\n".join(
-            f"[{m.id[:8]}] {m.content}" for m in active_memories
+            f"[{m.id}] {m.content}" for m in active_memories
         )
 
         # Format conversations
@@ -125,9 +125,15 @@ class DailyConsolidation:
 
         # Parse response
         text = (response.content or "").strip()
+        logger.debug(f"Consolidation LLM response for {ws.name}: {text[:300]}")
         if text.startswith("```"):
             text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         result = json_repair.loads(text)
+        if not isinstance(result, dict):
+            raise ValueError(
+                f"LLM returned non-dict response ({type(result).__name__}): "
+                f"{str(result)[:200]}"
+            )
 
         # Save daily note
         from miu_bot.db.backend import DailyNote

@@ -84,7 +84,7 @@ class MonthlyConsolidation:
             f"[{m.created_at.date()}] {m.content}" for m in weekly_insights
         )
         ref_text = "\n".join(
-            f"[{m.id[:8]}] {m.content}"
+            f"[{m.id}] {m.content}"
             for m in reference
             if m.source_type != "weekly_insight"
         )
@@ -111,6 +111,11 @@ class MonthlyConsolidation:
         if text.startswith("```"):
             text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         result = json_repair.loads(text)
+        if not isinstance(result, dict):
+            raise ValueError(
+                f"LLM returned non-dict response ({type(result).__name__}): "
+                f"{str(result)[:200]}"
+            )
 
         # Save monthly summary as Archive memory
         if summary := result.get("monthly_summary"):
@@ -122,15 +127,21 @@ class MonthlyConsolidation:
                 source_type="monthly_summary",
             )
 
-        # Archive old Reference memories
+        # Archive old Reference memories (IDs from LLM may be hallucinated)
         for mem_id in result.get("archive_from_reference", []):
-            await self.backend.promote_memory_tier(
-                mem_id, "archive", "monthly_summary"
-            )
+            try:
+                await self.backend.promote_memory_tier(
+                    mem_id, "archive", "monthly_summary"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to archive memory {mem_id}: {e}")
 
         # Prune contradictions
         for item in result.get("prune_contradictions", []):
-            await self.backend.promote_memory_tier(item["memory_id"], "archive")
+            try:
+                await self.backend.promote_memory_tier(item["memory_id"], "archive")
+            except Exception as e:
+                logger.warning(f"Failed to prune memory {item}: {e}")
 
         # Housekeeping: delete old Archive (>90d) and old daily_notes (>60d)
         cutoff_archive = now - timedelta(days=90)
