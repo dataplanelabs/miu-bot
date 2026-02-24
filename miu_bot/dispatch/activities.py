@@ -78,13 +78,21 @@ async def consolidate_memory_activity(
         logger.error("No connection pool available for consolidation")
         return {"status": "error", "error": "no_pool"}
 
-    # Create provider from fallback config
+    # Resolve provider from workspace config_overrides (same as message processing)
+    from miu_bot.config.bots import _resolve_env_fields
+
+    ws = await backend.get_workspace(workspace_id)
+    provider_cfg = (ws.config_overrides or {}).get("provider", {}) if ws else {}
+    resolved = _resolve_env_fields(provider_cfg)
+    model = resolved.get("model", deps.get("fallback_model", ""))
+    api_key = resolved.get("api_key", deps.get("fallback_api_key", ""))
+    api_base = resolved.get("api_base", deps.get("fallback_api_base"))
+
     provider = LiteLLMProvider(
-        api_key=deps.get("fallback_api_key", ""),
-        api_base=deps.get("fallback_api_base"),
-        default_model=deps.get("fallback_model", ""),
+        api_key=api_key,
+        api_base=api_base,
+        default_model=model,
     )
-    model = deps.get("fallback_model", "")
 
     # Route to the appropriate consolidation class
     if consolidation_type == "weekly":
