@@ -162,11 +162,14 @@ class SlackChannel(BaseChannel):
         except Exception as e:
             logger.debug(f"Slack reactions_add failed: {e}")
 
+        is_group = channel_type != "im"
         await self._handle_message(
             sender_id=sender_id,
             chat_id=chat_id,
             content=text,
             metadata={
+                "is_group": is_group,
+                "sender_name": sender_id,  # Slack user ID; display name resolved later if needed
                 "slack": {
                     "event": event,
                     "thread_ts": thread_ts,

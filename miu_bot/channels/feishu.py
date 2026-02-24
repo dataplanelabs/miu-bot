@@ -386,7 +386,8 @@ class FeishuChannel(BaseChannel):
                 return
             
             # Forward to message bus
-            reply_to = chat_id if chat_type == "group" else sender_id
+            is_group = chat_type == "group"
+            reply_to = chat_id if is_group else sender_id
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=reply_to,
@@ -395,6 +396,8 @@ class FeishuChannel(BaseChannel):
                     "message_id": message_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,
+                    "is_group": is_group,
+                    "sender_name": sender_id,  # Feishu open_id; display name not in event payload
                 }
             )
             

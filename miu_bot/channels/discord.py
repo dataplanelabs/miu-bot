@@ -226,6 +226,10 @@ class DiscordChannel(BaseChannel):
 
         await self._start_typing(channel_id)
 
+        # guild_id present means it's a server channel (group), absent means DM
+        is_group = bool(payload.get("guild_id"))
+        sender_name = author.get("global_name") or author.get("username") or ""
+
         await self._handle_message(
             sender_id=sender_id,
             chat_id=channel_id,
@@ -235,6 +239,8 @@ class DiscordChannel(BaseChannel):
                 "message_id": str(payload.get("id", "")),
                 "guild_id": payload.get("guild_id"),
                 "reply_to": reply_to,
+                "is_group": is_group,
+                "sender_name": sender_name,
             },
         )
 
