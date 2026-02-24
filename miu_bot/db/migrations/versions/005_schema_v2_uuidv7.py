@@ -33,8 +33,7 @@ def upgrade() -> None:
         CASCADE
     """)
 
-    # Drop uuid-ossp extension (no longer needed — PG 18 has uuidv7() built-in)
-    op.execute('DROP EXTENSION IF EXISTS "uuid-ossp"')
+    # Skip DROP EXTENSION uuid-ossp — requires superuser; harmless to leave
 
     # -- Recreate tables in FK order --
 
