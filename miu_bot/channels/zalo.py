@@ -1,7 +1,9 @@
 """Zalo channel implementation using ZCA-CLI WebSocket bridge."""
 
 import asyncio
+import hashlib
 import json
+import time
 
 from loguru import logger
 
@@ -30,6 +32,8 @@ class ZaloChannel(BaseChannel):
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
         self._thread_types: dict[str, int] = {}  # chat_id -> thread_type (1=user, 2=group)
         self._response_waiters: dict[str, asyncio.Future] = {}  # response_type -> future
+        self._seen_msgs: dict[str, float] = {}  # dedup_key -> timestamp
+        self._dedup_ttl = 300  # ignore duplicate messages within 5 min window
 
     async def start(self) -> None:
         """Start the Zalo channel by connecting to the bridge."""
@@ -77,6 +81,20 @@ class ZaloChannel(BaseChannel):
     def get_thread_type(self, chat_id: str) -> int:
         """Get cached thread type for a chat (1=user, 2=group)."""
         return self._thread_types.get(chat_id, 1)
+
+    def _is_duplicate(self, key: str) -> bool:
+        """Check if message was already seen; evict expired entries."""
+        now = time.monotonic()
+        # Evict stale entries periodically (when cache grows beyond 200)
+        if len(self._seen_msgs) > 200:
+            self._seen_msgs = {
+                k: t for k, t in self._seen_msgs.items()
+                if now - t < self._dedup_ttl
+            }
+        if key in self._seen_msgs and now - self._seen_msgs[key] < self._dedup_ttl:
+            return True
+        self._seen_msgs[key] = now
+        return False
 
     async def send_and_wait(self, cmd: dict, expected_type: str) -> dict:
         """Send a WS command and wait for a matching response type."""
@@ -223,6 +241,14 @@ class ZaloChannel(BaseChannel):
             content = normalize_content(data.get("content"))
             is_group = data.get("threadType") == "group"
             thread_type = 2 if is_group else 1
+
+            # Deduplicate: use msgId from bridge, fallback to content hash
+            dedup_key = data.get("msgId") or hashlib.sha256(
+                f"{sender_id}:{thread_id}:{content}".encode()
+            ).hexdigest()[:16]
+            if self._is_duplicate(dedup_key):
+                logger.debug(f"Zalo: duplicate message skipped (key={dedup_key[:8]})")
+                return
 
             # Cache thread type for outbound message routing
             self._thread_types[thread_id] = thread_type
