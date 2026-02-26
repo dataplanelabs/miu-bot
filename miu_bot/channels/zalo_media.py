@@ -17,32 +17,42 @@ _MEDIA_MARKER_RE = re.compile(r'\[(?P<kind>send-image|send-file):(?P<path>[^\]]+
 _MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
-def normalize_content(content: Any) -> str:
-    """Normalize content payload to text string.
+def normalize_content(content: Any) -> tuple[str, list[str]]:
+    """Normalize content payload to text string + extracted media URLs.
 
-    Zalo sends media as dicts with ``href``/``url`` keys.  Convert these
-    to a compact human-readable form so they don't bloat LLM context.
+    Zalo sends media as dicts with ``href``/``url`` keys.  Extracts URLs
+    into a separate list for multimodal LLM processing (base64 injection).
+
+    Returns:
+        (text_content, media_urls)
     """
     if isinstance(content, str):
-        return content.strip()
+        return content.strip(), []
     if content is None:
-        return ""
+        return "", []
     if isinstance(content, list):
-        parts = [normalize_content(item) for item in content if item]
-        return "\n".join(parts).strip()
+        texts = []
+        media_urls: list[str] = []
+        for item in content:
+            if item:
+                t, m = normalize_content(item)
+                if t:
+                    texts.append(t)
+                media_urls.extend(m)
+        return "\n".join(texts).strip(), media_urls
     if isinstance(content, dict):
         # Zalo image/file: {"title": "...", "description": "...", "href": "..."}
         url = content.get("href") or content.get("url") or ""
         desc = content.get("description") or content.get("title") or ""
         if url:
             label = desc if desc else "media"
-            return f"[Sent {label}: {url}]"
+            return f"[Sent {label}: {url}]", [url]
         # Fallback for other dicts
         try:
-            return json.dumps(content, ensure_ascii=False)
+            return json.dumps(content, ensure_ascii=False), []
         except TypeError:
-            return str(content)
-    return str(content)
+            return str(content), []
+    return str(content), []
 
 
 def extract_media_markers(content: str) -> tuple[list[dict], str]:

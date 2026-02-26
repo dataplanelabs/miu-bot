@@ -35,6 +35,7 @@ async def dispatch_message(
     metadata: dict[str, Any] | None = None,
     bot_name: str = "",
     task_queue: str = "default-tasks",
+    media: list[str] | None = None,
 ) -> None:
     """Start or signal a BotSessionWorkflow for the given session.
 
@@ -53,6 +54,7 @@ async def dispatch_message(
         "sender_id": sender_id,
         "content": content,
         "metadata": metadata or {},
+        "media": media or [],
     }
     session_info = {
         "workspace_id": workspace_id,

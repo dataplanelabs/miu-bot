@@ -46,6 +46,7 @@ async def process_message_activity(
         "content": msg.get("content", ""),
         "metadata": msg.get("metadata", {}),
         "bot_name": session_info.get("bot_name", ""),
+        "media": msg.get("media", []),
     }
 
     logger.info(

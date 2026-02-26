@@ -238,7 +238,7 @@ class ZaloChannel(BaseChannel):
         if msg_type == "message":
             sender_id = data.get("senderId", "")
             thread_id = data.get("threadId", "")
-            content = normalize_content(data.get("content"))
+            content, media_urls = normalize_content(data.get("content"))
             is_group = data.get("threadType") == "group"
             thread_type = 2 if is_group else 1
 
@@ -280,6 +280,7 @@ class ZaloChannel(BaseChannel):
                 sender_id=sender_id,
                 chat_id=thread_id,
                 content=content,
+                media=media_urls if media_urls else None,
                 metadata={
                     "sender_name": data.get("senderName"),
                     "thread_name": data.get("threadName"),

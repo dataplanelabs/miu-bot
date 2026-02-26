@@ -714,6 +714,7 @@ def _serve_gateway(port: int, verbose: bool, bots_config_path: Path | None = Non
                         metadata=msg.metadata,
                         bot_name=msg.bot_name,
                         task_queue=task_queue,
+                        media=msg.media if msg.media else None,
                     )
                 except asyncio.TimeoutError:
                     continue

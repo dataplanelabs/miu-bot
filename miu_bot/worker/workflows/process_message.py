@@ -92,6 +92,7 @@ class ProcessMessageWorkflow:
         metadata = workflow_input.get("metadata", {})
         sender_id = workflow_input.get("sender_id", "")
         bot_name = workflow_input.get("bot_name", "")
+        media_urls = workflow_input.get("media", [])
 
         # Persist sender_id in metadata for history attribution
         if sender_id:
@@ -217,6 +218,14 @@ class ProcessMessageWorkflow:
                     content, sender_id, metadata.get("sender_name", ""),
                 )
 
+            # Resolve media URLs to base64/text for multimodal LLM input
+            media_parts: list = []
+            if media_urls:
+                from miu_bot.agent.media_resolver import resolve_media_urls
+                media_parts = await resolve_media_urls(media_urls)
+                if media_parts:
+                    logger.info(f"Resolved {len(media_parts)} media attachment(s) for {bot_name}")
+
             _heartbeat({"phase": "context_ready"})
 
             # Build LLM messages using composed prompt
@@ -226,6 +235,15 @@ class ProcessMessageWorkflow:
                 current_message=current_message, channel=channel, chat_id=chat_id,
                 is_group=metadata.get("is_group", False),
             )
+
+            # Inject resolved media into the user message for multimodal processing
+            if media_parts and llm_messages:
+                last_msg = llm_messages[-1]
+                if last_msg.get("role") == "user":
+                    existing = last_msg["content"]
+                    if isinstance(existing, str):
+                        existing = [{"type": "text", "text": existing}]
+                    llm_messages[-1]["content"] = media_parts + existing
 
             # Run agent loop with heartbeat reporting
             response_content, tools_used, trace = await run_agent_loop(
