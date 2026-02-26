@@ -19,8 +19,14 @@ async def send_response(
     content: str,
     metadata: dict[str, Any] | None = None,
     bot_name: str = "",
+    idempotency_key: str = "",
 ) -> None:
-    """Send a response via the gateway's /internal/send endpoint."""
+    """Send a response via the gateway's /internal/send endpoint.
+
+    Args:
+        idempotency_key: Unique key to prevent duplicate sends on activity retries.
+            Gateway will reject responses with a previously-seen key.
+    """
     if httpx is None:
         raise ImportError("httpx required for worker response delivery")
 
@@ -31,10 +37,13 @@ async def send_response(
         "content": content,
         "metadata": metadata or {},
         "bot_name": bot_name,
+        "idempotency_key": idempotency_key,
     }
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(url, json=payload)
-        if resp.status_code != 200:
+        if resp.status_code == 409:
+            logger.info(f"Duplicate response suppressed for {channel}:{chat_id} (key={idempotency_key[:12]})")
+        elif resp.status_code != 200:
             logger.warning(f"Gateway response delivery failed: {resp.status_code} {resp.text}")
         else:
             logger.debug(f"Response delivered via gateway for {channel}:{chat_id}")

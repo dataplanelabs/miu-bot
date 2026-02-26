@@ -256,10 +256,16 @@ class ProcessMessageWorkflow:
                 {"tools_used": tools_used} if tools_used else None,
             )
 
+            # Build idempotency key to prevent duplicate sends on retries
+            import hashlib
+            idem_src = f"{channel}:{chat_id}:{metadata.get('timestamp', '')}:{content[:100]}"
+            idem_key = hashlib.sha256(idem_src.encode()).hexdigest()[:24]
+
             # Send response via gateway (include bot_name for routing)
             await send_response(
                 self.gateway_url, channel, chat_id,
                 response_content, metadata, bot_name=bot_name,
+                idempotency_key=idem_key,
             )
 
             total_s = round(_time.monotonic() - t_start, 2)

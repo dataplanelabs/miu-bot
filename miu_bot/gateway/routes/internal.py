@@ -1,8 +1,11 @@
 """Internal endpoints for worker-to-gateway communication."""
 
 import os
+import time
+from collections import OrderedDict
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 
@@ -16,6 +19,31 @@ async def _verify_internal_key(x_internal_key: str = Header(default="")) -> None
 
 router = APIRouter(dependencies=[Depends(_verify_internal_key)])
 
+# In-memory idempotency cache: key → timestamp (TTL-based eviction)
+_SEEN_KEYS: OrderedDict[str, float] = OrderedDict()
+_SEEN_TTL = 600  # 10 minutes
+_SEEN_MAX = 5000
+
+
+def _check_idempotency(key: str) -> bool:
+    """Return True if key was already seen (duplicate). Manages TTL eviction."""
+    now = time.monotonic()
+    # Evict expired entries
+    while _SEEN_KEYS:
+        oldest_key, oldest_ts = next(iter(_SEEN_KEYS.items()))
+        if now - oldest_ts > _SEEN_TTL:
+            _SEEN_KEYS.pop(oldest_key)
+        else:
+            break
+    # Cap size
+    while len(_SEEN_KEYS) >= _SEEN_MAX:
+        _SEEN_KEYS.popitem(last=False)
+
+    if key in _SEEN_KEYS:
+        return True
+    _SEEN_KEYS[key] = now
+    return False
+
 
 class SendRequest(BaseModel):
     channel: str
@@ -23,11 +51,19 @@ class SendRequest(BaseModel):
     content: str
     metadata: dict = {}
     bot_name: str = ""
+    idempotency_key: str = ""
 
 
 @router.post("/send")
 async def send_message(req: SendRequest, request: Request):
     """Receive a response from a worker and dispatch to the channel."""
+    # Reject duplicate sends from activity retries
+    if req.idempotency_key and _check_idempotency(req.idempotency_key):
+        return JSONResponse(
+            status_code=409,
+            content={"status": "duplicate", "message": "response already sent"},
+        )
+
     from miu_bot.bus.events import OutboundMessage
 
     bus = request.app.state.bus
