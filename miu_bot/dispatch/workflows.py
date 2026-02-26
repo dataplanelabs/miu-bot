@@ -82,6 +82,22 @@ class BotSessionWorkflow:
                         "tools_used": result.get("tools_used", []),
                         "total_s": result.get("total_s"),
                     }
+
+                    # Send response ONLY after processing fully succeeds.
+                    # This prevents duplicate messages on activity retries.
+                    if result.get("status") == "ok" and result.get("response_content"):
+                        await workflow.execute_activity(
+                            "send_response_activity",
+                            args=[{
+                                "channel": result["channel"],
+                                "chat_id": result["chat_id"],
+                                "content": result["response_content"],
+                                "metadata": result.get("metadata", {}),
+                                "bot_name": result.get("bot", ""),
+                            }],
+                            start_to_close_timeout=timedelta(seconds=30),
+                            retry_policy=RetryPolicy(maximum_attempts=3),
+                        )
             except ActivityError:
                 logger.error(
                     f"Message processing failed after retries, "

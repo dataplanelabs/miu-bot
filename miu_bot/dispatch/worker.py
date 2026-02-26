@@ -44,12 +44,18 @@ async def run_temporal_worker(
     )
     from miu_bot.dispatch.activities import (
         process_message_activity,
+        send_response_activity,
         consolidate_memory_activity,
         run_cron_activity,
     )
 
     workflows = [BotSessionWorkflow, ConsolidateMemoryWorkflow, CronTaskWorkflow]
-    activities = [process_message_activity, consolidate_memory_activity, run_cron_activity]
+    activities = [
+        process_message_activity,
+        send_response_activity,
+        consolidate_memory_activity,
+        run_cron_activity,
+    ]
 
     workers: list[Worker] = []
     for queue in task_queues:

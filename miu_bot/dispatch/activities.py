@@ -58,6 +58,32 @@ async def process_message_activity(
 
 
 @activity.defn
+async def send_response_activity(payload: dict[str, Any]) -> dict[str, Any]:
+    """Send a processed response to the gateway.
+
+    Separated from process_message_activity so that responses are only
+    sent after the processing activity fully succeeds — preventing
+    duplicate messages on heartbeat-timeout retries.
+    """
+    from miu_bot.dispatch.worker import get_activity_deps
+    from miu_bot.worker.response import send_response
+
+    deps = get_activity_deps()
+    gateway_url = deps["gateway_url"]
+
+    await send_response(
+        gateway_url=gateway_url,
+        channel=payload["channel"],
+        chat_id=payload["chat_id"],
+        content=payload["content"],
+        metadata=payload.get("metadata", {}),
+        bot_name=payload.get("bot_name", ""),
+        idempotency_key=payload.get("idempotency_key", ""),
+    )
+    return {"status": "sent"}
+
+
+@activity.defn
 async def consolidate_memory_activity(
     workspace_id: str, consolidation_type: str = "daily"
 ) -> dict[str, Any]:

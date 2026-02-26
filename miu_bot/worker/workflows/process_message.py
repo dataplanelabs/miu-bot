@@ -76,8 +76,6 @@ class ProcessMessageWorkflow:
         from miu_bot.agent.context import ContextBuilder
         from miu_bot.agent.processor import run_agent_loop
         from miu_bot.agent.tools.registry import ToolRegistry
-        from miu_bot.worker.response import send_response
-
         t_start = _time.monotonic()
 
         # Send heartbeat during long setup phases (MCP, context assembly)
@@ -256,29 +254,25 @@ class ProcessMessageWorkflow:
                 {"tools_used": tools_used} if tools_used else None,
             )
 
-            # Build idempotency key to prevent duplicate sends on retries
-            import hashlib
-            idem_src = f"{channel}:{chat_id}:{metadata.get('timestamp', '')}:{content[:100]}"
-            idem_key = hashlib.sha256(idem_src.encode()).hexdigest()[:24]
-
-            # Send response via gateway (include bot_name for routing)
-            await send_response(
-                self.gateway_url, channel, chat_id,
-                response_content, metadata, bot_name=bot_name,
-                idempotency_key=idem_key,
-            )
-
             total_s = round(_time.monotonic() - t_start, 2)
             if span:
                 span.set_attribute("miubot.total_s", total_s)
+
+            # NOTE: Response is NOT sent here. The workflow sends it after
+            # the activity succeeds, preventing duplicates on retries.
             return {
                 "status": "ok",
                 "bot": bot_name,
                 "model": model,
                 "tools_used": tools_used,
                 "total_s": total_s,
+                "response_content": response_content,
                 "response_preview": response_content[:300],
                 "trace": trace,
+                # Pass through for workflow to send
+                "channel": channel,
+                "chat_id": chat_id,
+                "metadata": metadata,
             }
         finally:
             if span_ctx:
