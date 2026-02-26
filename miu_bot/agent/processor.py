@@ -37,6 +37,47 @@ def _is_side_effect_tool(name: str) -> bool:
     return any(lower.startswith(p) for p in _SIDE_EFFECT_PREFIXES)
 
 
+_HEARTBEAT_INTERVAL = 60  # seconds between heartbeats during tool execution
+
+
+async def _execute_with_heartbeat(
+    tools: "ToolRegistry",
+    name: str,
+    arguments: dict,
+    on_heartbeat: Any,
+    iteration: int,
+) -> str:
+    """Execute a tool call with periodic heartbeat pings.
+
+    Sends a heartbeat every 60s while the tool runs, preventing
+    Temporal activity heartbeat timeouts on long-running tools.
+    """
+    if not on_heartbeat:
+        return await tools.execute(name, arguments)
+
+    async def _heartbeat_loop() -> None:
+        tick = 0
+        while True:
+            await asyncio.sleep(_HEARTBEAT_INTERVAL)
+            tick += 1
+            on_heartbeat({
+                "phase": "tool_running",
+                "iteration": iteration,
+                "tool": name,
+                "elapsed_s": tick * _HEARTBEAT_INTERVAL,
+            })
+
+    hb_task = asyncio.create_task(_heartbeat_loop())
+    try:
+        return await tools.execute(name, arguments)
+    finally:
+        hb_task.cancel()
+        try:
+            await hb_task
+        except asyncio.CancelledError:
+            pass
+
+
 async def run_agent_loop(
     provider: "LLMProvider",
     messages: list[dict[str, Any]],
@@ -169,14 +210,17 @@ async def run_agent_loop(
                     }
                     logger.info(f"Dedup hit for '{tool_call.name}'")
                 else:
-                    # Normal execution
+                    # Normal execution with periodic heartbeat for long-running tools
                     t0 = time.monotonic()
                     tool_span = tracer.start_span(
                         f"tool.{tool_call.name}",
                         attributes={"miubot.tool": tool_call.name},
                     ) if tracer else None
                     try:
-                        result = await tools.execute(tool_call.name, tool_call.arguments)
+                        result = await _execute_with_heartbeat(
+                            tools, tool_call.name, tool_call.arguments,
+                            on_heartbeat, iteration,
+                        )
                         elapsed = round(time.monotonic() - t0, 2)
                         _record_tool_latency(tool_call.name, elapsed)
                         if tool_span:
