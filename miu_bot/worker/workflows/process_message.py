@@ -80,6 +80,13 @@ class ProcessMessageWorkflow:
 
         t_start = _time.monotonic()
 
+        # Send heartbeat during long setup phases (MCP, context assembly)
+        def _heartbeat(data: dict) -> None:
+            try:
+                activity.heartbeat(data)
+            except Exception:
+                pass  # heartbeat failures are non-fatal
+
         workspace_id = workflow_input["workspace_id"]
         channel = workflow_input["channel"]
         chat_id = workflow_input["chat_id"]
@@ -138,6 +145,7 @@ class ProcessMessageWorkflow:
                 logger.info(f"Connected {mcp_count} MCP server(s) for {bot_name}")
                 if span:
                     span.set_attribute("miubot.mcp_servers", mcp_count)
+            _heartbeat({"phase": "mcp_connected", "mcp_count": mcp_count})
 
             # Load context
             messages = await self.backend.get_messages(session_id, limit=50)
@@ -211,6 +219,8 @@ class ProcessMessageWorkflow:
                     content, sender_id, metadata.get("sender_name", ""),
                 )
 
+            _heartbeat({"phase": "context_ready"})
+
             # Build LLM messages using composed prompt
             context_builder = ContextBuilder(workspace=None)
             llm_messages = context_builder.build_workspace_messages_from_prompt(
@@ -220,12 +230,6 @@ class ProcessMessageWorkflow:
             )
 
             # Run agent loop with heartbeat reporting
-            def _heartbeat(data: dict) -> None:
-                try:
-                    activity.heartbeat(data)
-                except Exception:
-                    pass  # heartbeat failures are non-fatal
-
             response_content, tools_used, trace = await run_agent_loop(
                 provider=provider, messages=llm_messages, tools=tools,
                 model=model, temperature=self.temperature,

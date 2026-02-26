@@ -1,5 +1,6 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+import asyncio
 import json
 import json_repair
 import os
@@ -12,13 +13,47 @@ from litellm import acompletion
 from loguru import logger
 from tenacity import (
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_random_exponential,
-    retry_if_exception_type,
+    wait_fixed,
+    wait_combine,
 )
 
 from miu_bot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from miu_bot.providers.registry import find_by_model, find_gateway
+
+
+def _extract_retry_after(exc: Exception) -> float | None:
+    """Extract Retry-After seconds from a LiteLLM rate limit exception."""
+    # LiteLLM wraps the original response headers in the exception
+    headers = getattr(exc, "response", None)
+    if headers is not None:
+        headers = getattr(headers, "headers", None)
+    if headers:
+        val = headers.get("Retry-After") or headers.get("retry-after")
+        if val:
+            try:
+                return min(float(val), 120.0)  # cap at 2min
+            except (ValueError, TypeError):
+                pass
+    # Fallback: parse "try again in Xs" from error message
+    msg = str(exc)
+    for marker in ("try again in ", "retry after "):
+        idx = msg.lower().find(marker)
+        if idx != -1:
+            num_str = ""
+            for c in msg[idx + len(marker):]:
+                if c.isdigit() or c == ".":
+                    num_str += c
+                else:
+                    break
+            if num_str:
+                try:
+                    return min(float(num_str), 120.0)
+                except ValueError:
+                    pass
+    return None
 
 
 class LiteLLMProvider(LLMProvider):
@@ -201,8 +236,8 @@ class LiteLLMProvider(LLMProvider):
             )
     
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_random_exponential(multiplier=1, min=2, max=30),
+        stop=stop_after_attempt(4),
+        wait=wait_random_exponential(multiplier=2, min=3, max=60),
         retry=retry_if_exception_type((
             litellm.RateLimitError,
             litellm.APIConnectionError,
@@ -211,13 +246,25 @@ class LiteLLMProvider(LLMProvider):
         )),
         reraise=True,
         before_sleep=lambda retry_state: logger.warning(
-            f"LLM retry {retry_state.attempt_number}/3 "
+            f"LLM retry {retry_state.attempt_number}/4 "
             f"after {type(retry_state.outcome.exception()).__name__}"
         ),
     )
     async def _call_with_retry(self, **kwargs: Any) -> Any:
-        """Call acompletion with tenacity retry on transient errors."""
-        return await acompletion(**kwargs)
+        """Call acompletion with tenacity retry on transient errors.
+
+        Uses exponential backoff (3-60s) with 4 attempts.
+        On RateLimitError, respects Retry-After header if available.
+        """
+        try:
+            return await acompletion(**kwargs)
+        except litellm.RateLimitError as e:
+            # Extract Retry-After from error headers if available
+            retry_after = _extract_retry_after(e)
+            if retry_after and retry_after > 0:
+                logger.info(f"Rate limited, waiting {retry_after}s (Retry-After)")
+                await asyncio.sleep(retry_after)
+            raise
 
     async def _direct_chat(self, kwargs: dict[str, Any]) -> LLMResponse:
         """Direct HTTP fallback when LiteLLM can't parse the provider's response."""
