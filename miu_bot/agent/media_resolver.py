@@ -97,6 +97,60 @@ def _to_pdf_part(data: bytes, url: str) -> dict[str, Any]:
     }
 
 
+_VISION_DESCRIBE_PROMPT = (
+    "Describe this image in detail. Include: what you see, any text/numbers visible, "
+    "layout, colors, and any notable details. Be concise but thorough."
+)
+
+
+async def describe_images(
+    image_parts: list[dict[str, Any]],
+    provider: "LLMProvider",  # noqa: F821 — avoid circular import
+    vision_model: str,
+) -> list[dict[str, Any]]:
+    """Convert image_url parts to text descriptions via a vision model.
+
+    Used when primary model doesn't support vision but a fallback is configured.
+    Returns text parts with image descriptions. Skips images that fail.
+
+    Note: vision_fallback_model must be reachable with the same provider credentials.
+    """
+    text_parts: list[dict[str, Any]] = []
+    for i, part in enumerate(image_parts):
+        if part.get("type") != "image_url":
+            text_parts.append(part)
+            continue
+        try:
+            messages = [
+                {"role": "user", "content": [
+                    part,
+                    {"type": "text", "text": _VISION_DESCRIBE_PROMPT},
+                ]},
+            ]
+            response = await provider.chat(
+                messages=messages,
+                model=vision_model,
+                max_tokens=1024,
+                temperature=0.3,
+            )
+            description = response.content or "[Image could not be described]"
+            text_parts.append({
+                "type": "text",
+                "text": (
+                    f"[Image {i + 1} description]\n"
+                    f"<image_description untrusted=\"true\">\n{description}\n</image_description>"
+                ),
+            })
+            logger.info(f"Vision fallback described image {i + 1} ({len(description)} chars)")
+        except Exception as e:
+            logger.warning(f"Vision fallback failed for image {i + 1}: {e}")
+            text_parts.append({
+                "type": "text",
+                "text": f"[Image {i + 1}: description unavailable]",
+            })
+    return text_parts
+
+
 def _extract_pdf_text(data: bytes) -> str:
     """Extract text from PDF bytes using pymupdf if available."""
     try:

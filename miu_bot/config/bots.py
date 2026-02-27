@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 class BotProviderConfig(BaseModel):
     """Per-bot LLM provider config."""
     model: str = ""  # LiteLLM model string, e.g. "openai/gpt-4o"
+    vision_fallback_model: str = ""  # Vision model for image description (e.g. "glm-4v")
     api_key: str = ""  # Resolved from api_key_env
     api_key_env: str = ""  # Env var name for api_key (stored as-is, worker resolves)
     api_base: str = ""  # Resolved from api_base_env

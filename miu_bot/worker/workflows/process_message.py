@@ -245,15 +245,35 @@ class ProcessMessageWorkflow:
             if media_parts and llm_messages:
                 last_msg = llm_messages[-1]
                 if last_msg.get("role") == "user":
-                    # Only inject image_url parts if model supports vision;
-                    # non-vision models (e.g. glm-5) reject multimodal content.
                     try:
                         import litellm as _litellm
                         vision_ok = _litellm.supports_vision(model=model)
                     except Exception:
                         vision_ok = False
+
                     if not vision_ok:
-                        media_parts = [p for p in media_parts if p.get("type") == "text"]
+                        # Check for vision fallback model
+                        vision_fallback = (
+                            workspace.config_overrides
+                            .get("provider", {})
+                            .get("vision_fallback_model", "")
+                        )
+                        if vision_fallback:
+                            from miu_bot.agent.media_resolver import describe_images
+                            image_parts = [p for p in media_parts if p.get("type") == "image_url"]
+                            text_parts = [p for p in media_parts if p.get("type") == "text"]
+                            if image_parts:
+                                described = await describe_images(image_parts, provider, vision_fallback)
+                                media_parts = text_parts + described
+                                logger.info(
+                                    f"Vision fallback: {len(image_parts)} image(s) described via {vision_fallback}"
+                                )
+                            else:
+                                media_parts = text_parts
+                        else:
+                            # No fallback configured — strip image parts (v0.22.1 behavior)
+                            media_parts = [p for p in media_parts if p.get("type") == "text"]
+
                     if media_parts:
                         existing = last_msg["content"]
                         if isinstance(existing, str):
