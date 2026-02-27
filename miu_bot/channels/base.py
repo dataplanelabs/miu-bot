@@ -54,9 +54,21 @@ class BaseChannel(ABC):
     async def send(self, msg: OutboundMessage) -> None:
         """
         Send a message through this channel.
-        
+
         Args:
             msg: The message to send.
+        """
+        pass
+
+    async def react(self, chat_id: str, message_id: str, emoji: str) -> None:
+        """React to a message with an emoji.
+
+        No-op by default. Channels that support reactions override this.
+
+        Args:
+            chat_id: Channel/chat identifier.
+            message_id: ID of the message to react to.
+            emoji: Unicode emoji character (e.g. "👍").
         """
         pass
     

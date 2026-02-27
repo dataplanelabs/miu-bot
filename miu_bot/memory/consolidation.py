@@ -20,9 +20,10 @@ from miu_bot.memory.prompts import DAILY_CONSOLIDATION_PROMPT
 class DailyConsolidation:
     """Process yesterday's messages into daily notes + Active memories."""
 
-    def __init__(self, backend: "MemoryBackend", pool: Any):
+    def __init__(self, backend: "MemoryBackend", pool: Any, embedding_model: str | None = None):
         self.backend = backend
         self._pool = pool
+        self._embedding_model = embedding_model
 
     async def run_for_workspace(
         self,
@@ -153,7 +154,7 @@ class DailyConsolidation:
         )
         await self.backend.save_daily_note(note)
 
-        # Save new Active-tier memories
+        # Save new Active-tier memories (with optional embedding generation)
         new_facts = result.get("new_facts", [])
         for fact in new_facts:
             await self.backend.save_memory(
@@ -163,6 +164,7 @@ class DailyConsolidation:
                 tier="active",
                 source_type="daily_note",
                 priority=fact.get("priority", 0),
+                embedding_model=self._embedding_model,
             )
 
         # Mark messages as consolidated (per-session)

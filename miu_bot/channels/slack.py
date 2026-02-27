@@ -16,6 +16,21 @@ from miu_bot.channels.base import BaseChannel
 from miu_bot.config.schema import SlackConfig
 
 
+# Best-effort unicode → Slack emoji name lookup table
+_SLACK_EMOJI_NAMES: dict[str, str] = {
+    "👍": "thumbsup",
+    "👎": "thumbsdown",
+    "❤️": "heart",
+    "😂": "joy",
+    "😮": "open_mouth",
+    "😢": "cry",
+    "🎉": "tada",
+    "🔥": "fire",
+    "✅": "white_check_mark",
+    "❌": "x",
+}
+
+
 class SlackChannel(BaseChannel):
     """Slack channel using Socket Mode."""
 
@@ -168,6 +183,7 @@ class SlackChannel(BaseChannel):
             chat_id=chat_id,
             content=text,
             metadata={
+                "message_id": event.get("ts", ""),
                 "is_group": is_group,
                 "sender_name": sender_id,  # Slack user ID; display name resolved later if needed
                 "slack": {
@@ -177,6 +193,23 @@ class SlackChannel(BaseChannel):
                 }
             },
         )
+
+    async def react(self, chat_id: str, message_id: str, emoji: str) -> None:
+        """Add emoji reaction to a Slack message (message_id = event timestamp)."""
+        if not self._web_client or not message_id:
+            return
+        try:
+            emoji_name = _SLACK_EMOJI_NAMES.get(emoji)
+            if not emoji_name:
+                # Best-effort: strip colons from :name: format, or pass raw stripped string
+                emoji_name = emoji.strip(":").lower()
+            await self._web_client.reactions_add(
+                channel=chat_id,
+                timestamp=message_id,
+                name=emoji_name,
+            )
+        except Exception as exc:
+            logger.warning("Slack react failed (%s on %s): %s", emoji, message_id, exc)
 
     def _is_allowed(self, sender_id: str, chat_id: str, channel_type: str) -> bool:
         if channel_type == "im":

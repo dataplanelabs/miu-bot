@@ -55,6 +55,7 @@ class ProcessMessageWorkflow:
         temperature: float = 0.7,
         max_tokens: int = 4096,
         max_iterations: int = 20,
+        embedding_model: str | None = None,
     ):
         self.backend = backend
         self.gateway_url = gateway_url
@@ -64,6 +65,7 @@ class ProcessMessageWorkflow:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.max_iterations = max_iterations
+        self.embedding_model = embedding_model
 
     async def process(self, workflow_input: dict[str, Any]) -> dict[str, Any]:
         """Process a message:received event."""
@@ -159,8 +161,13 @@ class ProcessMessageWorkflow:
             from miu_bot.memory.context_assembly import assemble_memory_context
             from miu_bot.workspace.identity import compose_from_templates
 
+            # Resolve embedding model: workspace override takes precedence over global default
+            ws_embedding_model = (
+                workspace.config_overrides.get("embedding_model") or self.embedding_model
+            )
             memories_text = await assemble_memory_context(
-                self.backend, workspace_id, query=content
+                self.backend, workspace_id, query=content,
+                embedding_model=ws_embedding_model,
             )
             history = _build_history(messages, is_group=metadata.get("is_group", False))
 

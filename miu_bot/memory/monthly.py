@@ -19,9 +19,10 @@ from miu_bot.memory.prompts import MONTHLY_CONSOLIDATION_PROMPT
 class MonthlyConsolidation:
     """Deep consolidation: Reference -> Archive + monthly summary."""
 
-    def __init__(self, backend: "MemoryBackend", pool: Any):
+    def __init__(self, backend: "MemoryBackend", pool: Any, embedding_model: str | None = None):
         self.backend = backend
         self._pool = pool
+        self._embedding_model = embedding_model
 
     async def run_for_workspace(
         self,
@@ -125,6 +126,7 @@ class MonthlyConsolidation:
                 content=summary,
                 tier="archive",
                 source_type="monthly_summary",
+                embedding_model=self._embedding_model,
             )
 
         # Archive old Reference memories (IDs from LLM may be hallucinated)

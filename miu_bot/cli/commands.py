@@ -445,6 +445,10 @@ def _serve_combined(port: int, verbose: bool):
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
+    channels = ChannelManager(config, bus)
+    if channels.enabled_channels:
+        console.print(f"[green]✓[/green] Channels: {', '.join(channels.enabled_channels)}")
+
     agent = AgentLoop(
         bus=bus, provider=provider, workspace=config.workspace_path,
         model=config.agents.defaults.model,
@@ -459,6 +463,7 @@ def _serve_combined(port: int, verbose: bool):
         claude_code_config=config.tools.claude_code,
         backend=backend,
         media_config=config.media,
+        channel_manager=channels,
     )
 
     async def on_cron_job(job: CronJob) -> str | None:
@@ -481,10 +486,6 @@ def _serve_combined(port: int, verbose: bool):
         workspace=config.workspace_path, on_heartbeat=on_heartbeat,
         interval_s=30 * 60, enabled=True,
     )
-
-    channels = ChannelManager(config, bus)
-    if channels.enabled_channels:
-        console.print(f"[green]✓[/green] Channels: {', '.join(channels.enabled_channels)}")
 
     # Register Zalo tool if Zalo channel is active
     zalo_ch = channels.get_channel("zalo")
@@ -858,12 +859,20 @@ def gateway(
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
-    
+
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
-    
-    # Create agent with cron service
+
+    # Create channel manager before agent so ReactTool can be registered
+    channels = ChannelManager(config, bus)
+
+    if channels.enabled_channels:
+        console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
+    else:
+        console.print("[yellow]Warning: No channels enabled[/yellow]")
+
+    # Create agent with cron service and channel manager
     agent = AgentLoop(
         bus=bus,
         provider=provider,
@@ -880,8 +889,9 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         claude_code_config=config.tools.claude_code,
+        channel_manager=channels,
     )
-    
+
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
@@ -900,26 +910,18 @@ def gateway(
             ))
         return response
     cron.on_job = on_cron_job
-    
+
     # Create heartbeat service
     async def on_heartbeat(prompt: str) -> str:
         """Execute heartbeat through the agent."""
         return await agent.process_direct(prompt, session_key="heartbeat")
-    
+
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
         on_heartbeat=on_heartbeat,
         interval_s=30 * 60,  # 30 minutes
         enabled=True
     )
-    
-    # Create channel manager
-    channels = ChannelManager(config, bus)
-    
-    if channels.enabled_channels:
-        console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
-    else:
-        console.print("[yellow]Warning: No channels enabled[/yellow]")
 
     # Register Zalo tool if Zalo channel is active
     zalo_ch = channels.get_channel("zalo")

@@ -35,6 +35,7 @@ async def process_message_activity(
         max_tokens=deps["max_tokens"],
         temperature=deps["temperature"],
         max_iterations=deps["max_iterations"],
+        embedding_model=deps.get("embedding_model"),
     )
 
     workflow_input = {
@@ -121,19 +122,21 @@ async def consolidate_memory_activity(
         default_model=model,
     )
 
+    embedding_model = deps.get("embedding_model")
+
     # Route to the appropriate consolidation class
     if consolidation_type == "weekly":
         from miu_bot.memory.weekly import WeeklyConsolidation
 
-        consolidation = WeeklyConsolidation(backend, pool)
+        consolidation = WeeklyConsolidation(backend, pool, embedding_model=embedding_model)
     elif consolidation_type == "monthly":
         from miu_bot.memory.monthly import MonthlyConsolidation
 
-        consolidation = MonthlyConsolidation(backend, pool)
+        consolidation = MonthlyConsolidation(backend, pool, embedding_model=embedding_model)
     else:
         from miu_bot.memory.consolidation import DailyConsolidation
 
-        consolidation = DailyConsolidation(backend, pool)
+        consolidation = DailyConsolidation(backend, pool, embedding_model=embedding_model)
 
     result = await consolidation.run_for_workspace(workspace_id, provider, model)
     logger.info(f"Consolidation result: ws={workspace_id[:8]} {result}")

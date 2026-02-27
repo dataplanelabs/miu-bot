@@ -271,6 +271,20 @@ class TelegramChannel(BaseChannel):
                 except Exception as e2:
                     logger.error(f"Error sending Telegram message: {e2}")
     
+    async def react(self, chat_id: str, message_id: str, emoji: str) -> None:
+        """Set emoji reaction on a Telegram message (Bot API >= 7.0)."""
+        if not self._app:
+            return
+        try:
+            from telegram import ReactionTypeEmoji
+            await self._app.bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=int(message_id),
+                reaction=[ReactionTypeEmoji(emoji=emoji)],
+            )
+        except Exception as exc:
+            logger.warning("Telegram react failed (%s on %s): %s", emoji, message_id, exc)
+
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
         if not update.message or not update.effective_user:
@@ -394,7 +408,7 @@ class TelegramChannel(BaseChannel):
             content=content,
             media=media_paths,
             metadata={
-                "message_id": message.message_id,
+                "message_id": str(message.message_id),
                 "user_id": user.id,
                 "username": user.username,
                 "first_name": user.first_name,

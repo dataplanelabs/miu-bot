@@ -186,6 +186,8 @@ class AgentDefaults(BaseModel):
     mcp_connect_timeout: int = 60  # seconds
     mcp_retry_attempts: int = 2  # extra SSE retries (total = 1 + this)
     session_idle_timeout: int = 300  # seconds
+    # MIU-4: pgvector semantic memory — None disables embeddings (zero overhead)
+    embedding_model: str | None = None  # e.g. "text-embedding-3-small"
 
 
 class AgentsConfig(BaseModel):

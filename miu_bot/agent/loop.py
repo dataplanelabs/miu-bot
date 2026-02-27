@@ -23,6 +23,7 @@ from miu_bot.agent.tools.cron import CronTool
 from miu_bot.agent.tools.zalo import ZaloTool
 from miu_bot.agent.memory import MemoryStore
 from miu_bot.agent.subagent import SubagentManager
+from miu_bot.db.usage import BudgetExceededError, RateLimitError, RateLimiter, UsageLogger
 from miu_bot.session.manager import Session, SessionManager
 
 
@@ -59,9 +60,11 @@ class AgentLoop:
         resolver: "WorkspaceResolver | None" = None,
         media_config: "MediaConfig | None" = None,
         session_idle_timeout: int = 300,
+        channel_manager: "ChannelManager | None" = None,
     ):
         from miu_bot.config.schema import ExecToolConfig, ClaudeCodeConfig, MediaConfig
         from miu_bot.cron.service import CronService
+        from miu_bot.channels.manager import ChannelManager
         self.bus = bus
         self.provider = provider
         self.workspace = workspace
@@ -94,6 +97,8 @@ class AgentLoop:
         
         self.backend = backend
         self.resolver = resolver
+        self._rate_limiter = RateLimiter()
+        self._usage_logger = UsageLogger()
         self._media_config = media_config
         self._media_client = None
         if media_config and media_config.backend == "seaweedfs" and media_config.endpoint_url:
@@ -116,6 +121,11 @@ class AgentLoop:
         self._session_queues: dict[str, asyncio.Queue] = {}
         # Per-session locks for tool context — shared tools have mutable routing state
         self._session_locks: dict[str, asyncio.Lock] = {}
+        # Routing state for tools that need channel/message context
+        self._current_channel: str = ""
+        self._current_chat_id: str = ""
+        self._current_message_id: str = ""
+        self._channel_manager: ChannelManager | None = channel_manager
         self._register_default_tools()
 
     def _get_session_lock(self, session_key: str) -> asyncio.Lock:
@@ -164,6 +174,18 @@ class AgentLoop:
                 config=self.claude_code_config,
                 workspace=str(self.workspace),
             ))
+
+        # React tool (emoji reactions) — only when channel manager is available
+        if self._channel_manager:
+            from miu_bot.agent.tools.react import ReactTool
+            self.tools.register(ReactTool(
+                get_channel_fn=self._channel_manager.get_channel,
+                get_context_fn=lambda: (
+                    self._current_channel,
+                    self._current_chat_id,
+                    self._current_message_id,
+                ),
+            ))
     
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -175,8 +197,12 @@ class AgentLoop:
         await self._mcp_stack.__aenter__()
         await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
 
-    def _set_tool_context(self, channel: str, chat_id: str) -> None:
+    def _set_tool_context(self, channel: str, chat_id: str, message_id: str = "") -> None:
         """Update context for all tools that need routing info."""
+        self._current_channel = channel
+        self._current_chat_id = chat_id
+        self._current_message_id = message_id
+
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.set_context(channel, chat_id)
@@ -195,7 +221,7 @@ class AgentLoop:
 
     async def _run_agent_loop(
         self, initial_messages: list[dict], channel: str = "",
-        chat_id: str = "", session_key: str = "",
+        chat_id: str = "", session_key: str = "", message_id: str = "",
     ) -> tuple[str | None, list[str], dict[str, int], list[dict]]:
         """
         Run the agent iteration loop.
@@ -263,7 +289,7 @@ class AgentLoop:
                 # Per-session lock to prevent race on mutable tool routing state
                 lock = self._get_session_lock(session_key or f"{channel}:{chat_id}")
                 async with lock:
-                    self._set_tool_context(channel, chat_id)
+                    self._set_tool_context(channel, chat_id, message_id)
                     for tool_call in response.tool_calls:
                         tools_used.append(tool_call.name)
                         args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
@@ -415,6 +441,21 @@ class AgentLoop:
             logger.warning(f"Workspace {workspace_id} inactive — skipping")
             return None
 
+        # MIU-26: Rate limit + budget pre-flight (fail-open on DB errors)
+        overrides = ws.config_overrides or {}
+        try:
+            self._rate_limiter.check_rpm(
+                workspace_id, int(overrides.get("rate_limit_rpm", 0))
+            )
+            await self._usage_logger.check_budget(ws)
+        except (RateLimitError, BudgetExceededError) as exc:
+            logger.warning("Workspace %s blocked: %s", workspace_id, exc)
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content=f"Sorry, this workspace has reached its usage limit: {exc}",
+                metadata=msg.metadata or {},
+            )
+
         # Session
         session = await self.backend.get_or_create_session(workspace_id, msg.channel, msg.chat_id)
 
@@ -470,10 +511,32 @@ class AgentLoop:
         final_content, tools_used, total_usage, all_messages = await self._run_agent_loop(
             initial_messages, channel=msg.channel, chat_id=msg.chat_id,
             session_key=f"{workspace_id}:{msg.channel}:{msg.chat_id}",
+            message_id=msg.metadata.get("message_id", "") if msg.metadata else "",
         )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
+
+        # MIU-26: Fire-and-forget usage log (non-blocking)
+        if total_usage.get("total_tokens", 0) > 0:
+            from miu_bot.observability.cost import estimate_cost
+            cost = estimate_cost(
+                self.model,
+                total_usage.get("prompt_tokens", 0),
+                total_usage.get("completion_tokens", 0),
+            )
+            asyncio.create_task(
+                self._usage_logger.log_usage(
+                    self.backend,
+                    workspace_id=workspace_id,
+                    session_id=getattr(session, "id", None),
+                    model=self.model,
+                    prompt_tokens=total_usage.get("prompt_tokens", 0),
+                    completion_tokens=total_usage.get("completion_tokens", 0),
+                    total_tokens=total_usage.get("total_tokens", 0),
+                    cost_usd=cost,
+                )
+            )
 
         # Upload media to SeaweedFS and build refs
         media_refs: list[dict] = []
@@ -610,6 +673,7 @@ class AgentLoop:
         final_content, tools_used, _, _ = await self._run_agent_loop(
             initial_messages, channel=msg.channel, chat_id=msg.chat_id,
             session_key=key,
+            message_id=msg.metadata.get("message_id", "") if msg.metadata else "",
         )
 
         if final_content is None:

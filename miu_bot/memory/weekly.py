@@ -19,9 +19,10 @@ from miu_bot.memory.prompts import WEEKLY_CONSOLIDATION_PROMPT
 class WeeklyConsolidation:
     """Compress daily notes -> Reference tier memories."""
 
-    def __init__(self, backend: "MemoryBackend", pool: Any):
+    def __init__(self, backend: "MemoryBackend", pool: Any, embedding_model: str | None = None):
         self.backend = backend
         self._pool = pool
+        self._embedding_model = embedding_model
 
     async def run_for_workspace(
         self,
@@ -120,6 +121,7 @@ class WeeklyConsolidation:
                 content=insight,
                 tier="reference",
                 source_type="weekly_insight",
+                embedding_model=self._embedding_model,
             )
 
         # Promote stable knowledge to Reference
@@ -131,6 +133,7 @@ class WeeklyConsolidation:
                 content=item["content"],
                 tier="reference",
                 source_type="weekly_insight",
+                embedding_model=self._embedding_model,
             )
 
         # Demote stale Active memories (IDs from LLM may be hallucinated)

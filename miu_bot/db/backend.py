@@ -16,6 +16,12 @@ class Workspace:
     status: str  # active | paused | archived
     created_at: datetime
     updated_at: datetime
+    # MIU-26: budget tracking — None = unconfigured/unlimited
+    max_budget_usd: float | None = None
+    soft_budget_usd: float | None = None
+    budget_duration: str = "30d"
+    budget_reset_at: datetime | None = None
+    spend_current: float = 0.0
 
 
 @dataclass
@@ -98,6 +104,19 @@ class WorkspaceTemplate:
 
 
 @dataclass
+class UsageLog:
+    id: str
+    workspace_id: str
+    session_id: str | None
+    model: str
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    cost_usd: float
+    created_at: datetime
+
+
+@dataclass
 class WorkspaceSkill:
     id: str
     workspace_id: str
@@ -112,6 +131,10 @@ class WorkspaceSkill:
     enabled: bool
     created_at: datetime
     updated_at: datetime
+    # MIU-1: per-workspace skill config (Open WebUI valves pattern)
+    config: dict[str, Any] = field(default_factory=dict)
+    handler_type: str = "prompt"  # prompt | function | api
+    config_schema: dict[str, Any] = field(default_factory=dict)
 
 
 @runtime_checkable
@@ -155,6 +178,7 @@ class MemoryBackend(Protocol):
         tier: str = "active",
         source_type: str | None = None,
         priority: int = 0,
+        embedding_model: str | None = None,
     ) -> Memory: ...
     async def get_memories(
         self, workspace_id: str, categories: list[str] | None = None
@@ -162,6 +186,14 @@ class MemoryBackend(Protocol):
     async def replace_memories(
         self, workspace_id: str, category: str, content: str
     ) -> None: ...
+    async def search_memories_semantic(
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int = 10,
+        category: str | None = None,
+        embedding_model: str = "text-embedding-3-small",
+    ) -> list[Memory]: ...
 
     # Tier-filtered memories
     async def get_memories_by_tier(
@@ -211,3 +243,22 @@ class MemoryBackend(Protocol):
     async def get_skills(
         self, workspace_id: str, enabled_only: bool = True,
     ) -> list[WorkspaceSkill]: ...
+
+    # MIU-26: Usage logging and budget enforcement
+    async def log_usage(
+        self,
+        workspace_id: str,
+        session_id: str | None,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int,
+        cost_usd: float,
+    ) -> None: ...
+    async def check_budget(self, workspace_id: str) -> None:
+        """Raise BudgetExceededError if workspace hard budget exceeded."""
+        ...
+    async def get_usage_summary(
+        self, workspace_id: str, days: int = 30,
+    ) -> dict[str, Any]: ...
+    async def reset_expired_budgets(self) -> int: ...

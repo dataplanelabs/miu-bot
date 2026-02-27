@@ -88,4 +88,8 @@ def _dict_to_workspace_skill(
         enabled=data.get("enabled", True),
         created_at=now,
         updated_at=now,
+        # MIU-1: new skill config fields (default-safe for old YAML)
+        handler_type=data.get("handler_type", "prompt"),
+        config=data.get("config", {}),
+        config_schema=data.get("config_schema", {}),
     )

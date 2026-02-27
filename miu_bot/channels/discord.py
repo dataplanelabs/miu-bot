@@ -260,6 +260,21 @@ class DiscordChannel(BaseChannel):
 
         self._typing_tasks[channel_id] = asyncio.create_task(typing_loop())
 
+    async def react(self, chat_id: str, message_id: str, emoji: str) -> None:
+        """Add emoji reaction to a Discord message."""
+        if not self._http:
+            return
+        try:
+            import urllib.parse
+            encoded_emoji = urllib.parse.quote(emoji)
+            url = f"{DISCORD_API_BASE}/channels/{chat_id}/messages/{message_id}/reactions/{encoded_emoji}/@me"
+            headers = {"Authorization": f"Bot {self.config.token}"}
+            resp = await self._http.put(url, headers=headers)
+            if resp.status_code not in (200, 204):
+                logger.warning("Discord react failed (%s on %s): HTTP %s", emoji, message_id, resp.status_code)
+        except Exception as exc:
+            logger.warning("Discord react failed (%s on %s): %s", emoji, message_id, exc)
+
     async def _stop_typing(self, channel_id: str) -> None:
         """Stop typing indicator for a channel."""
         task = self._typing_tasks.pop(channel_id, None)
