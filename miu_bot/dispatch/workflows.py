@@ -11,6 +11,7 @@ from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
     from loguru import logger
+    from miu_bot.worker.workflows.shared import _FALLBACK_MESSAGE
 
 
 @workflow.defn
@@ -101,8 +102,24 @@ class BotSessionWorkflow:
             except ActivityError:
                 logger.error(
                     f"Message processing failed after retries, "
-                    f"session={session_info.get('session_id', '?')[:8]}, skipping"
+                    f"session={session_info.get('session_id', '?')[:8]}, sending fallback"
                 )
+                # Send fallback so user isn't left hanging
+                try:
+                    await workflow.execute_activity(
+                        "send_response_activity",
+                        args=[{
+                            "channel": msg.get("channel", ""),
+                            "chat_id": msg.get("chat_id", ""),
+                            "content": _FALLBACK_MESSAGE,
+                            "metadata": msg.get("metadata", {}),
+                            "bot_name": msg.get("bot_name", ""),
+                        }],
+                        start_to_close_timeout=timedelta(seconds=30),
+                        retry_policy=RetryPolicy(maximum_attempts=2),
+                    )
+                except ActivityError:
+                    logger.error("Failed to send fallback message, giving up")
 
             self._message_count += 1
 

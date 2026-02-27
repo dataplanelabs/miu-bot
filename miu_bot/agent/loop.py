@@ -58,6 +58,7 @@ class AgentLoop:
         backend: "MemoryBackend | None" = None,
         resolver: "WorkspaceResolver | None" = None,
         media_config: "MediaConfig | None" = None,
+        session_idle_timeout: int = 300,
     ):
         from miu_bot.config.schema import ExecToolConfig, ClaudeCodeConfig, MediaConfig
         from miu_bot.cron.service import CronService
@@ -105,6 +106,7 @@ class AgentLoop:
             except Exception as e:
                 logger.warning(f"Failed to init media client: {e}")
 
+        self._session_idle_timeout = session_idle_timeout
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
@@ -336,7 +338,7 @@ class AgentLoop:
     async def _session_worker(self, key: str) -> None:
         """Process messages for a single session sequentially."""
         queue = self._session_queues[key]
-        idle_timeout = 300  # Clean up worker after 5 min idle
+        idle_timeout = self._session_idle_timeout
         try:
             while self._running:
                 try:

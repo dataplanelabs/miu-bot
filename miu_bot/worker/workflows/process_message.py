@@ -76,6 +76,9 @@ class ProcessMessageWorkflow:
         from miu_bot.agent.context import ContextBuilder
         from miu_bot.agent.processor import run_agent_loop
         from miu_bot.agent.tools.registry import ToolRegistry
+        from miu_bot.worker.workflows.shared import (
+            create_provider, connect_mcp, connect_skill_mcp, sanitize_response,
+        )
         t_start = _time.monotonic()
 
         # Send heartbeat during long setup phases (MCP, context assembly)
@@ -122,8 +125,11 @@ class ProcessMessageWorkflow:
         )
         session_id = session.id
 
-        # Create per-workspace provider
-        provider, model = self._create_provider(workspace.config_overrides)
+        # Create per-workspace provider (shared helper)
+        provider, model = create_provider(
+            workspace.config_overrides,
+            self.fallback_model, self.fallback_api_key, self.fallback_api_base,
+        )
         if span:
             span.set_attribute("miubot.model", model)
 
@@ -136,8 +142,8 @@ class ProcessMessageWorkflow:
             templates = await self.backend.get_templates(workspace_id)
             db_skills = await self.backend.get_skills(workspace_id)
 
-            # Connect MCP servers from config_overrides
-            mcp_count = await self._connect_mcp(
+            # Connect MCP servers from config_overrides (shared helper)
+            mcp_count = await connect_mcp(
                 workspace.config_overrides, tools, mcp_stack
             )
             if mcp_count:
@@ -184,17 +190,9 @@ class ProcessMessageWorkflow:
             if skills_section:
                 full_prompt = f"{base_prompt}\n\n{skills_section}"
 
-            # Connect skill-provided MCP servers
+            # Connect skill-provided MCP servers (shared helper)
             if skill_mcp:
-                from miu_bot.config.bots import _resolve_env_fields
-                from miu_bot.config.schema import MCPServerConfig
-                from miu_bot.agent.tools.mcp import connect_mcp_servers
-                for name, cfg_dict in skill_mcp.items():
-                    resolved = _resolve_env_fields(cfg_dict)
-                    cfg = MCPServerConfig.model_validate(resolved)
-                    if cfg.url:
-                        extra = await connect_mcp_servers({name: cfg}, tools, mcp_stack)
-                        mcp_count += extra
+                mcp_count += await connect_skill_mcp(skill_mcp, tools, mcp_stack)
 
             # Register Zalo tool for Zalo channels (HTTP proxy to gateway)
             if channel == "zalo":
@@ -259,6 +257,9 @@ class ProcessMessageWorkflow:
                     "I've completed processing but have no response to give."
                 )
 
+            # Sanitize before sending to user (error boundary)
+            response_content = sanitize_response(response_content)
+
             if span:
                 span.set_attribute("miubot.tools_used", ",".join(tools_used))
                 span.set_attribute("miubot.response_len", len(response_content))
@@ -302,66 +303,3 @@ class ProcessMessageWorkflow:
                     logger.debug(f"Suppressed MCP cleanup error: {e}")
                 else:
                     raise
-
-    def _create_provider(
-        self, config_overrides: dict[str, Any]
-    ) -> tuple[Any, str]:
-        """Create LLMProvider from workspace config_overrides.
-
-        Resolves *_env references from os.environ at runtime.
-        Returns (provider, model_string).
-        """
-        from miu_bot.config.bots import _resolve_env_fields
-        from miu_bot.providers.litellm_provider import LiteLLMProvider
-
-        provider_cfg = config_overrides.get("provider", {})
-        # Resolve *_env fields (api_key_env, api_base_env) from worker's env vars
-        resolved = _resolve_env_fields(provider_cfg)
-        model = resolved.get("model", self.fallback_model)
-        api_key = resolved.get("api_key", self.fallback_api_key)
-        api_base = resolved.get("api_base", self.fallback_api_base)
-
-        provider = LiteLLMProvider(
-            api_key=api_key,
-            api_base=api_base,
-            default_model=model,
-        )
-        return provider, model
-
-    async def _connect_mcp(
-        self,
-        config_overrides: dict[str, Any],
-        tools: Any,
-        stack: AsyncExitStack,
-    ) -> int:
-        """Connect HTTP MCP servers from workspace config_overrides.
-
-        V1: HTTP/SSE MCP only — stdio MCP deferred.
-        Resolves *_env references (headers_env) from worker's env vars.
-        Returns the number of successfully connected servers.
-        """
-        from miu_bot.config.bots import _resolve_env_fields
-        from miu_bot.config.schema import MCPServerConfig
-        from miu_bot.agent.tools.mcp import connect_mcp_servers
-
-        mcp_raw = (
-            config_overrides.get("tools", {}).get("mcp_servers", {})
-        )
-        if not mcp_raw:
-            return 0
-
-        # Resolve *_env fields and filter to HTTP-only
-        mcp_servers: dict[str, MCPServerConfig] = {}
-        for name, cfg_dict in mcp_raw.items():
-            resolved = _resolve_env_fields(cfg_dict)
-            cfg = MCPServerConfig.model_validate(resolved)
-            # V1: skip stdio MCP servers (no command field)
-            if cfg.url:
-                mcp_servers[name] = cfg
-            elif cfg.command:
-                logger.info(f"Skipping stdio MCP '{name}' (deferred to V2)")
-
-        if not mcp_servers:
-            return 0
-
-        return await connect_mcp_servers(mcp_servers, tools, stack)

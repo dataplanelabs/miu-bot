@@ -37,20 +37,18 @@ def _is_side_effect_tool(name: str) -> bool:
     return any(lower.startswith(p) for p in _SIDE_EFFECT_PREFIXES)
 
 
-_HEARTBEAT_INTERVAL = 60  # seconds between heartbeats during tool execution
-
-
 async def _execute_with_heartbeat(
     tools: "ToolRegistry",
     name: str,
     arguments: dict,
     on_heartbeat: Any,
     iteration: int,
+    heartbeat_interval: int = 60,
 ) -> str:
     """Execute a tool call with periodic heartbeat pings.
 
-    Sends a heartbeat every 60s while the tool runs, preventing
-    Temporal activity heartbeat timeouts on long-running tools.
+    Sends a heartbeat every ``heartbeat_interval`` seconds while the tool runs,
+    preventing Temporal activity heartbeat timeouts on long-running tools.
     """
     if not on_heartbeat:
         return await tools.execute(name, arguments)
@@ -58,13 +56,13 @@ async def _execute_with_heartbeat(
     async def _heartbeat_loop() -> None:
         tick = 0
         while True:
-            await asyncio.sleep(_HEARTBEAT_INTERVAL)
+            await asyncio.sleep(heartbeat_interval)
             tick += 1
             on_heartbeat({
                 "phase": "tool_running",
                 "iteration": iteration,
                 "tool": name,
-                "elapsed_s": tick * _HEARTBEAT_INTERVAL,
+                "elapsed_s": tick * heartbeat_interval,
             })
 
     hb_task = asyncio.create_task(_heartbeat_loop())
@@ -88,6 +86,8 @@ async def run_agent_loop(
     max_iterations: int = 20,
     max_same_tool_calls: int = DEFAULT_MAX_SAME_TOOL_CALLS,
     on_heartbeat: Any = None,
+    llm_call_timeout: int = 180,
+    heartbeat_interval: int = 60,
 ) -> tuple[str | None, list[str], list[dict[str, Any]]]:
     """Run the iterative LLM + tool execution loop.
 
@@ -116,10 +116,10 @@ async def run_agent_loop(
                     temperature=temperature,
                     max_tokens=max_tokens,
                 ),
-                timeout=180,
+                timeout=llm_call_timeout,
             )
         except asyncio.TimeoutError:
-            logger.warning("LLM call timed out after 180s")
+            logger.warning(f"LLM call timed out after {llm_call_timeout}s")
             if llm_span:
                 llm_span.set_attribute("error", True)
                 llm_span.end()
@@ -220,7 +220,7 @@ async def run_agent_loop(
                     try:
                         result = await _execute_with_heartbeat(
                             tools, tool_call.name, tool_call.arguments,
-                            on_heartbeat, iteration,
+                            on_heartbeat, iteration, heartbeat_interval,
                         )
                         elapsed = round(time.monotonic() - t0, 2)
                         _record_tool_latency(tool_call.name, elapsed)

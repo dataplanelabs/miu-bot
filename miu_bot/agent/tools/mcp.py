@@ -13,12 +13,13 @@ from miu_bot.agent.tools.registry import ToolRegistry
 class MCPToolWrapper(Tool):
     """Wraps a single MCP server tool as a miu_bot Tool."""
 
-    def __init__(self, session, server_name: str, tool_def):
+    def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 300):
         self._session = session
         self._original_name = tool_def.name
         self._name = f"mcp_{server_name}_{tool_def.name}"
         self._description = tool_def.description or tool_def.name
         self._parameters = tool_def.inputSchema or {"type": "object", "properties": {}}
+        self._tool_timeout = tool_timeout
 
     @property
     def name(self) -> str:
@@ -32,8 +33,6 @@ class MCPToolWrapper(Tool):
     def parameters(self) -> dict[str, Any]:
         return self._parameters
 
-    MCP_TOOL_TIMEOUT = 300  # seconds (was 120; increased for slow MCP servers)
-
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
 
@@ -45,12 +44,12 @@ class MCPToolWrapper(Tool):
         try:
             result = await asyncio.wait_for(
                 self._session.call_tool(self._original_name, arguments=kwargs),
-                timeout=self.MCP_TOOL_TIMEOUT,
+                timeout=self._tool_timeout,
             )
         except asyncio.TimeoutError:
-            logger.warning(f"MCP tool '{self._original_name}' timed out after {self.MCP_TOOL_TIMEOUT}s")
+            logger.warning(f"MCP tool '{self._original_name}' timed out after {self._tool_timeout}s")
             return (
-                f"Tool call timed out after {self.MCP_TOOL_TIMEOUT}s but may have "
+                f"Tool call timed out after {self._tool_timeout}s but may have "
                 f"succeeded on the server. DO NOT retry — the operation may already "
                 f"be completed. Inform the user the action was attempted but "
                 f"confirmation is pending."
@@ -70,8 +69,8 @@ class MCPToolWrapper(Tool):
 
 
 
-MCP_CONNECT_TIMEOUT = 60  # seconds per server
-MCP_SSE_RETRIES = 2  # extra attempts for flaky SSE connections
+_DEFAULT_CONNECT_TIMEOUT = 60  # seconds per server
+_DEFAULT_SSE_RETRIES = 2  # extra attempts for flaky SSE connections
 
 
 def _format_exception_details(e: Exception) -> str:
@@ -83,7 +82,8 @@ def _format_exception_details(e: Exception) -> str:
 
 
 async def _try_connect_server(
-    name: str, cfg, server_stack: AsyncExitStack, registry: ToolRegistry
+    name: str, cfg, server_stack: AsyncExitStack, registry: ToolRegistry,
+    tool_timeout: int = 300,
 ) -> None:
     """Connect a single MCP server and register its tools."""
     from mcp import ClientSession
@@ -131,14 +131,17 @@ async def _try_connect_server(
 
     tools = await session.list_tools()
     for tool_def in tools.tools:
-        wrapper = MCPToolWrapper(session, name, tool_def)
+        wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=tool_timeout)
         registry.register(wrapper)
 
     logger.info(f"MCP '{name}': connected, {len(tools.tools)} tools registered")
 
 
 async def connect_mcp_servers(
-    mcp_servers: dict, registry: ToolRegistry, stack: AsyncExitStack
+    mcp_servers: dict, registry: ToolRegistry, stack: AsyncExitStack,
+    connect_timeout: int = _DEFAULT_CONNECT_TIMEOUT,
+    tool_timeout: int = 300,
+    sse_retries: int = _DEFAULT_SSE_RETRIES,
 ) -> int:
     """Connect to configured MCP servers and register their tools.
 
@@ -156,7 +159,7 @@ async def connect_mcp_servers(
             continue
 
         is_sse = cfg.url and cfg.url.startswith("sse://")
-        max_attempts = (1 + MCP_SSE_RETRIES) if is_sse else 1
+        max_attempts = (1 + sse_retries) if is_sse else 1
         last_error = None
 
         for attempt in range(1, max_attempts + 1):
@@ -166,8 +169,8 @@ async def connect_mcp_servers(
 
             try:
                 await asyncio.wait_for(
-                    _try_connect_server(name, cfg, server_stack, registry),
-                    timeout=MCP_CONNECT_TIMEOUT,
+                    _try_connect_server(name, cfg, server_stack, registry, tool_timeout),
+                    timeout=connect_timeout,
                 )
                 # Success — transfer cleanup responsibility to the main stack
                 stack.push_async_callback(_safe_aclose, server_stack)
@@ -176,7 +179,7 @@ async def connect_mcp_servers(
                 break
 
             except asyncio.TimeoutError:
-                logger.error(f"MCP '{name}': timed out after {MCP_CONNECT_TIMEOUT}s (attempt {attempt}/{max_attempts})")
+                logger.error(f"MCP '{name}': timed out after {connect_timeout}s (attempt {attempt}/{max_attempts})")
                 await _safe_aclose(server_stack)
                 last_error = "timeout"
             except asyncio.CancelledError:

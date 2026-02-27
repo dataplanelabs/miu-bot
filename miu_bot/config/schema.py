@@ -178,6 +178,14 @@ class AgentDefaults(BaseModel):
     retry_max_attempts: int = 3
     retry_min_wait: float = 2.0  # seconds
     retry_max_wait: float = 30.0  # seconds
+    # Timeouts and limits (Phase 3: config consolidation)
+    max_same_tool_calls: int = 3
+    llm_call_timeout: int = 180  # seconds
+    heartbeat_interval: int = 60  # seconds
+    mcp_tool_timeout: int = 300  # seconds
+    mcp_connect_timeout: int = 60  # seconds
+    mcp_retry_attempts: int = 2  # extra SSE retries (total = 1 + this)
+    session_idle_timeout: int = 300  # seconds
 
 
 class AgentsConfig(BaseModel):

@@ -47,6 +47,9 @@ class CronTaskProcessor:
         from miu_bot.config.bots import _resolve_env_fields
         from miu_bot.memory.context_assembly import assemble_memory_context
         from miu_bot.worker.response import send_response
+        from miu_bot.worker.workflows.shared import (
+            create_provider, connect_mcp, connect_skill_mcp, sanitize_response,
+        )
         from miu_bot.workspace.identity import (
             compose_from_templates,
             parse_identity,
@@ -66,8 +69,11 @@ class CronTaskProcessor:
         if not workspace or workspace.status != "active":
             return {"status": "skipped", "reason": "workspace_inactive"}
 
-        # Create per-workspace provider
-        provider, model = self._create_provider(workspace.config_overrides)
+        # Create per-workspace provider (shared helper)
+        provider, model = create_provider(
+            workspace.config_overrides,
+            self.fallback_model, self.fallback_api_key, self.fallback_api_base,
+        )
 
         # Setup tools and MCP
         tools = ToolRegistry()
@@ -78,8 +84,8 @@ class CronTaskProcessor:
             templates = await self.backend.get_templates(workspace_id)
             db_skills = await self.backend.get_skills(workspace_id)
 
-            # Connect MCP servers from config_overrides
-            mcp_count = await self._connect_mcp(
+            # Connect MCP servers from config_overrides (shared helper)
+            mcp_count = await connect_mcp(
                 workspace.config_overrides, tools, mcp_stack
             )
             if mcp_count:
@@ -115,16 +121,9 @@ class CronTaskProcessor:
             if skills_section:
                 full_prompt = f"{base_prompt}\n\n{skills_section}"
 
-            # Connect skill-provided MCP servers
+            # Connect skill-provided MCP servers (shared helper)
             if skill_mcp:
-                from miu_bot.config.schema import MCPServerConfig
-                from miu_bot.agent.tools.mcp import connect_mcp_servers
-                for name, cfg_dict in skill_mcp.items():
-                    resolved = _resolve_env_fields(cfg_dict)
-                    cfg = MCPServerConfig.model_validate(resolved)
-                    if cfg.url:
-                        extra = await connect_mcp_servers({name: cfg}, tools, mcp_stack)
-                        mcp_count += extra
+                mcp_count += await connect_skill_mcp(skill_mcp, tools, mcp_stack)
 
             # Build LLM messages — no history (cron job has no conversation)
             llm_messages = [
@@ -140,6 +139,9 @@ class CronTaskProcessor:
                 max_iterations=self.max_iterations,
                 max_same_tool_calls=20,
             )
+
+            # Sanitize before sending to user (error boundary)
+            response_content = sanitize_response(response_content)
 
             # Multi-target delivery
             delivered = 0
@@ -183,52 +185,3 @@ class CronTaskProcessor:
                     logger.debug(f"Suppressed MCP cleanup error: {e}")
                 else:
                     raise
-
-    def _create_provider(
-        self, config_overrides: dict[str, Any]
-    ) -> tuple[Any, str]:
-        """Create LLMProvider from workspace config_overrides."""
-        from miu_bot.config.bots import _resolve_env_fields
-        from miu_bot.providers.litellm_provider import LiteLLMProvider
-
-        provider_cfg = config_overrides.get("provider", {})
-        resolved = _resolve_env_fields(provider_cfg)
-        model = resolved.get("model", self.fallback_model)
-        api_key = resolved.get("api_key", self.fallback_api_key)
-        api_base = resolved.get("api_base", self.fallback_api_base)
-
-        provider = LiteLLMProvider(
-            api_key=api_key,
-            api_base=api_base,
-            default_model=model,
-        )
-        return provider, model
-
-    async def _connect_mcp(
-        self,
-        config_overrides: dict[str, Any],
-        tools: Any,
-        stack: AsyncExitStack,
-    ) -> int:
-        """Connect HTTP MCP servers from workspace config_overrides."""
-        from miu_bot.config.bots import _resolve_env_fields
-        from miu_bot.config.schema import MCPServerConfig
-        from miu_bot.agent.tools.mcp import connect_mcp_servers
-
-        mcp_raw = config_overrides.get("tools", {}).get("mcp_servers", {})
-        if not mcp_raw:
-            return 0
-
-        mcp_servers: dict[str, MCPServerConfig] = {}
-        for name, cfg_dict in mcp_raw.items():
-            resolved = _resolve_env_fields(cfg_dict)
-            cfg = MCPServerConfig.model_validate(resolved)
-            if cfg.url:
-                mcp_servers[name] = cfg
-            elif cfg.command:
-                logger.info(f"Skipping stdio MCP '{name}' (deferred to V2)")
-
-        if not mcp_servers:
-            return 0
-
-        return await connect_mcp_servers(mcp_servers, tools, stack)
