@@ -245,10 +245,20 @@ class ProcessMessageWorkflow:
             if media_parts and llm_messages:
                 last_msg = llm_messages[-1]
                 if last_msg.get("role") == "user":
-                    existing = last_msg["content"]
-                    if isinstance(existing, str):
-                        existing = [{"type": "text", "text": existing}]
-                    llm_messages[-1]["content"] = media_parts + existing
+                    # Only inject image_url parts if model supports vision;
+                    # non-vision models (e.g. glm-5) reject multimodal content.
+                    try:
+                        import litellm as _litellm
+                        vision_ok = _litellm.supports_vision(model=model)
+                    except Exception:
+                        vision_ok = False
+                    if not vision_ok:
+                        media_parts = [p for p in media_parts if p.get("type") == "text"]
+                    if media_parts:
+                        existing = last_msg["content"]
+                        if isinstance(existing, str):
+                            existing = [{"type": "text", "text": existing}]
+                        llm_messages[-1]["content"] = media_parts + existing
 
             # Run agent loop with heartbeat reporting
             response_content, tools_used, trace = await run_agent_loop(
