@@ -138,6 +138,7 @@ class CronTaskProcessor:
                 model=model, temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 max_iterations=self.max_iterations,
+                max_same_tool_calls=20,
             )
 
             # Multi-target delivery

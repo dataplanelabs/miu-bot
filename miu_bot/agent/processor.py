@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from miu_bot.providers.base import LLMProvider
     from miu_bot.agent.tools.registry import ToolRegistry
 
-MAX_SAME_TOOL_CALLS = 3
+DEFAULT_MAX_SAME_TOOL_CALLS = 3
 _SIDE_EFFECT_PREFIXES = (
     "create_", "update_", "delete_", "send_", "post_",
     "link_", "set_", "remove_", "add_", "unlink_",
@@ -86,6 +86,7 @@ async def run_agent_loop(
     temperature: float = 0.7,
     max_tokens: int = 4096,
     max_iterations: int = 20,
+    max_same_tool_calls: int = DEFAULT_MAX_SAME_TOOL_CALLS,
     on_heartbeat: Any = None,
 ) -> tuple[str | None, list[str], list[dict[str, Any]]]:
     """Run the iterative LLM + tool execution loop.
@@ -184,7 +185,7 @@ async def run_agent_loop(
                 call_key = f"{tool_call.name}:{args_json}"
                 count = tool_call_counts.get(tool_call.name, 0)
 
-                if count >= MAX_SAME_TOOL_CALLS:
+                if count >= max_same_tool_calls:
                     # Per-tool call cap reached
                     result = (
                         f"Tool '{tool_call.name}' called {count} times already. "
@@ -195,7 +196,7 @@ async def run_agent_loop(
                         "event": "tool_call", "iteration": iteration,
                         "tool": tool_call.name, "latency_s": 0, "status": "capped",
                     }
-                    logger.warning(f"Tool '{tool_call.name}' capped at {MAX_SAME_TOOL_CALLS} calls")
+                    logger.warning(f"Tool '{tool_call.name}' capped at {max_same_tool_calls} calls")
                 elif _is_side_effect_tool(tool_call.name) and call_key in executed_side_effects:
                     # Duplicate side-effect call
                     cached = executed_side_effects[call_key]
