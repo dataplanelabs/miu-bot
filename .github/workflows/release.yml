@@ -21,6 +21,11 @@ concurrency:
 
 permissions:
   contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   # === AUTO: Tag bump + release + docker build ===
@@ -62,20 +67,34 @@ jobs:
           token: ${{ steps.app_token.outputs.token }}
 
   auto-deploy:
-    name: Auto Deploy
+    name: Build and Push Docker Image
     needs: release
     if: github.event_name == 'push' && needs.release.outputs.new_tag
-    uses: dataplanelabs/.github/.github/workflows/docker-harbor.yml@main
-    secrets: inherit
-    with:
-      image_name: dataplanelabs/miu-bot
-      version: ${{ needs.release.outputs.new_tag }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.release.outputs.new_tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
   publish-chart:
     name: Publish Helm Chart
     needs: release
     if: github.event_name == 'push' && needs.release.outputs.new_tag
-    runs-on: k8s-runners
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -97,32 +116,17 @@ jobs:
         with:
           version: 'v3.16.0'
 
-      - name: Setup Harbor auth
+      - name: Log in to GHCR for Helm
         if: steps.check.outputs.changed == 'true'
         run: |
-          HELM_REGISTRY_CONFIG="${HELM_REGISTRY_CONFIG:-$HOME/.config/helm/registry/config.json}"
-          mkdir -p "$(dirname "$HELM_REGISTRY_CONFIG")" ~/.docker
-          if [ -f "/run/secrets/docker/config.json" ]; then
-            cp /run/secrets/docker/config.json ~/.docker/config.json
-            cp /run/secrets/docker/config.json "$HELM_REGISTRY_CONFIG"
-            echo "Using pre-mounted Docker credentials"
-          else
-            USERNAME="${HARBOR_USERNAME:-${{ secrets.HARBOR_USERNAME }}}"
-            PASSWORD="${HARBOR_PASSWORD:-${{ secrets.HARBOR_PASSWORD }}}"
-            if [ -z "$USERNAME" ] || [ -z "$PASSWORD" ]; then
-              echo "::error::Harbor credentials not found (env vars or secrets)"
-              exit 1
-            fi
-            echo "$PASSWORD" | \
-            helm registry login harbor.dataplanelabs.com \
-              --username "$USERNAME" \
-              --password-stdin
-          fi
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+          helm registry login ${{ env.REGISTRY }} \
+            --username "${{ github.actor }}" \
+            --password-stdin
 
       - name: Package and push chart
         if: steps.check.outputs.changed == 'true'
         run: |
-          # Strip 'v' prefix for Helm semver (v0.3.0 -> 0.3.0)
           CHART_VERSION="${{ needs.release.outputs.new_tag }}"
           CHART_VERSION="${CHART_VERSION#v}"
 
@@ -131,7 +135,7 @@ jobs:
             --app-version "${CHART_VERSION}"
 
           helm push "miu-bot-${CHART_VERSION}.tgz" \
-            oci://harbor.dataplanelabs.com/dataplanelabs/charts
+            oci://${{ env.REGISTRY }}/dataplanelabs/charts
 
       - name: Verify push
         if: steps.check.outputs.changed == 'true'
@@ -140,23 +144,37 @@ jobs:
           CHART_VERSION="${CHART_VERSION#v}"
 
           helm show chart \
-            oci://harbor.dataplanelabs.com/dataplanelabs/charts/miu-bot \
+            oci://${{ env.REGISTRY }}/dataplanelabs/charts/miu-bot \
             --version "${CHART_VERSION}"
 
   # === MANUAL: Docker build with custom version ===
   manual-deploy:
-    name: Manual Deploy
+    name: Manual Build and Push
     if: github.event_name == 'workflow_dispatch'
-    uses: dataplanelabs/.github/.github/workflows/docker-harbor.yml@main
-    secrets: inherit
-    with:
-      image_name: dataplanelabs/miu-bot
-      version: ${{ inputs.version }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
   manual-publish-chart:
     name: Manual Publish Chart
     if: github.event_name == 'workflow_dispatch'
-    runs-on: k8s-runners
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -165,26 +183,12 @@ jobs:
         with:
           version: 'v3.16.0'
 
-      - name: Setup Harbor auth
+      - name: Log in to GHCR for Helm
         run: |
-          HELM_REGISTRY_CONFIG="${HELM_REGISTRY_CONFIG:-$HOME/.config/helm/registry/config.json}"
-          mkdir -p "$(dirname "$HELM_REGISTRY_CONFIG")" ~/.docker
-          if [ -f "/run/secrets/docker/config.json" ]; then
-            cp /run/secrets/docker/config.json ~/.docker/config.json
-            cp /run/secrets/docker/config.json "$HELM_REGISTRY_CONFIG"
-            echo "Using pre-mounted Docker credentials"
-          else
-            USERNAME="${HARBOR_USERNAME:-${{ secrets.HARBOR_USERNAME }}}"
-            PASSWORD="${HARBOR_PASSWORD:-${{ secrets.HARBOR_PASSWORD }}}"
-            if [ -z "$USERNAME" ] || [ -z "$PASSWORD" ]; then
-              echo "::error::Harbor credentials not found (env vars or secrets)"
-              exit 1
-            fi
-            echo "$PASSWORD" | \
-            helm registry login harbor.dataplanelabs.com \
-              --username "$USERNAME" \
-              --password-stdin
-          fi
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+          helm registry login ${{ env.REGISTRY }} \
+            --username "${{ github.actor }}" \
+            --password-stdin
 
       - name: Package and push chart
         run: |
@@ -196,4 +200,4 @@ jobs:
             --app-version "${CHART_VERSION}"
 
           helm push "miu-bot-${CHART_VERSION}.tgz" \
-            oci://harbor.dataplanelabs.com/dataplanelabs/charts
+            oci://${{ env.REGISTRY }}/dataplanelabs/charts
