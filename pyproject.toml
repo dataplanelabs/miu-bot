@@ -8,11 +8,6 @@ authors = [
     {name = "miu-bot contributors"}
 ]
 keywords = ["ai", "agent", "chatbot", "temporal", "postgres", "durable-workflows"]
-[project.urls]
-Homepage = "https://github.com/dataplanelabs/miu-bot"
-Repository = "https://github.com/dataplanelabs/miu-bot"
-"Upstream (nanobot)" = "https://github.com/HKUDS/nanobot"
-
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -72,6 +67,11 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "ruff>=0.1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/dataplanelabs/miu-bot"
+Repository = "https://github.com/dataplanelabs/miu-bot"
+"Upstream (nanobot)" = "https://github.com/HKUDS/nanobot"
 
 [project.scripts]
 miubot = "miu_bot.cli.commands:app"
