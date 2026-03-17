@@ -3,7 +3,7 @@ namespace: miubot
 
 # -- Container image configuration
 image:
-  repository: harbor.dataplanelabs.com/dataplanelabs/miu-bot
+  repository: ghcr.io/dataplanelabs/miu-bot
   tag: ""  # Defaults to Chart.appVersion
   pullPolicy: IfNotPresent
 
